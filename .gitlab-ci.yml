@@ -77,6 +77,7 @@ semantic-release-lint:
 semantic-release:
   <<: *semantic-release-template
   stage: release
+  interruptible: false
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $RELEASE_ENABLED == "true"'
     - if: '$CI_PIPELINE_SOURCE == "web" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $RELEASE_ENABLED == "true"'
