@@ -1,0 +1,15 @@
+[package]
+name = "rmcp-server-builder"
+version = "0.1.0"
+edition = "2024"
+description = "Composable MCP server builder for zero-boilerplate capability composition"
+license = "MIT"
+repository = "https://gitlab.com/lx-industries/rmcp-server-builder"
+keywords = ["mcp", "model-context-protocol", "server", "builder"]
+categories = ["development-tools"]
+
+[dependencies]
+rmcp = { version = "0.12", features = ["server"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
