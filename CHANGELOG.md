@@ -1,3 +1,10 @@
+## [0.1.2](https://gitlab.com/lx-industries/rmcp-server-builder/compare/v0.1.1...v0.1.2) (2025-12-29)
+
+
+### Bug Fixes
+
+* use valid crates.io keywords ([5ed7642](https://gitlab.com/lx-industries/rmcp-server-builder/commit/5ed76420abf4a87de2e200fbe83bb7ba351cbd85))
+
 ## [0.1.1](https://gitlab.com/lx-industries/rmcp-server-builder/compare/v0.1.0...v0.1.1) (2025-12-29)
 
 
