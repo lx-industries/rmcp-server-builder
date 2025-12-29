@@ -5,7 +5,7 @@ edition = "2024"
 description = "Composable MCP server builder for zero-boilerplate capability composition"
 license = "MIT"
 repository = "https://gitlab.com/lx-industries/rmcp-server-builder"
-keywords = ["mcp", "model-context-protocol", "server", "builder"]
+keywords = ["mcp", "rmcp", "modelcontextprotocol", "server", "builder"]
 categories = ["development-tools"]
 
 [dependencies]
