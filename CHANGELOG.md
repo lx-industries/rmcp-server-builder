@@ -1,3 +1,16 @@
+## [0.1.5](https://gitlab.com/lx-industries/rmcp-server-builder/compare/v0.1.4...v0.1.5) (2026-01-26)
+
+
+### Bug Fixes
+
+* **ci:** disable auto-cancel for release pipelines ([f1a7d35](https://gitlab.com/lx-industries/rmcp-server-builder/commit/f1a7d351dcaae08836b27cbce1aff09ba3be2f63))
+
+
+### Miscellaneous Chores
+
+* **deps:** update rust docker tag to v1.93.0 ([40d9382](https://gitlab.com/lx-industries/rmcp-server-builder/commit/40d9382228a92a23091fbd28907ec2d298524963))
+* **deps:** update rust:1.92.0 docker digest to f589233 ([d073986](https://gitlab.com/lx-industries/rmcp-server-builder/commit/d07398623fd4ef742af39224af01dbde7fafa312))
+
 ## [0.1.4](https://gitlab.com/lx-industries/rmcp-server-builder/compare/v0.1.3...v0.1.4) (2026-01-19)
 
 
