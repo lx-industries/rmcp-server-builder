@@ -3,13 +3,13 @@
 use rmcp::{
     handler::server::ServerHandler,
     model::{
-        CallToolRequestParam, CallToolResult, CancelledNotificationParam, CompleteRequestParam,
-        CompleteResult, ErrorCode, ErrorData, GetPromptRequestParam, GetPromptResult,
-        InitializeRequestParam, InitializeResult, JsonObject, ListPromptsResult,
-        ListResourceTemplatesResult, ListResourcesResult, ListToolsResult, PaginatedRequestParam,
-        ProgressNotificationParam, PromptsCapability, ReadResourceRequestParam, ReadResourceResult,
-        ResourcesCapability, ServerCapabilities, ServerInfo, SetLevelRequestParam,
-        SubscribeRequestParam, ToolsCapability, UnsubscribeRequestParam,
+        CallToolRequestParams, CallToolResult, CancelledNotificationParam, CompleteRequestParams,
+        CompleteResult, ErrorCode, ErrorData, GetPromptRequestParams, GetPromptResult,
+        InitializeRequestParams, InitializeResult, JsonObject, ListPromptsResult,
+        ListResourceTemplatesResult, ListResourcesResult, ListToolsResult, PaginatedRequestParams,
+        ProgressNotificationParam, PromptsCapability, ReadResourceRequestParams,
+        ReadResourceResult, ResourcesCapability, ServerCapabilities, ServerInfo,
+        SetLevelRequestParams, SubscribeRequestParams, ToolsCapability, UnsubscribeRequestParams,
     },
     service::{NotificationContext, RequestContext, RoleServer},
 };
@@ -95,7 +95,7 @@ where
 
     async fn initialize(
         &self,
-        _request: InitializeRequestParam,
+        _request: InitializeRequestParams,
         _context: RequestContext<RoleServer>,
     ) -> Result<InitializeResult, ErrorData> {
         let base = self.info.get_info();
@@ -113,7 +113,7 @@ where
 
     async fn list_tools(
         &self,
-        request: Option<PaginatedRequestParam>,
+        request: Option<PaginatedRequestParams>,
         context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
         match &self.tools {
@@ -128,7 +128,7 @@ where
 
     async fn call_tool(
         &self,
-        request: CallToolRequestParam,
+        request: CallToolRequestParams,
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         match &self.tools {
@@ -143,7 +143,7 @@ where
 
     async fn list_prompts(
         &self,
-        request: Option<PaginatedRequestParam>,
+        request: Option<PaginatedRequestParams>,
         context: RequestContext<RoleServer>,
     ) -> Result<ListPromptsResult, ErrorData> {
         match &self.prompts {
@@ -158,7 +158,7 @@ where
 
     async fn get_prompt(
         &self,
-        request: GetPromptRequestParam,
+        request: GetPromptRequestParams,
         context: RequestContext<RoleServer>,
     ) -> Result<GetPromptResult, ErrorData> {
         match &self.prompts {
@@ -173,7 +173,7 @@ where
 
     async fn list_resources(
         &self,
-        request: Option<PaginatedRequestParam>,
+        request: Option<PaginatedRequestParams>,
         context: RequestContext<RoleServer>,
     ) -> Result<ListResourcesResult, ErrorData> {
         match &self.resources {
@@ -188,7 +188,7 @@ where
 
     async fn list_resource_templates(
         &self,
-        request: Option<PaginatedRequestParam>,
+        request: Option<PaginatedRequestParams>,
         context: RequestContext<RoleServer>,
     ) -> Result<ListResourceTemplatesResult, ErrorData> {
         match &self.resources {
@@ -203,7 +203,7 @@ where
 
     async fn read_resource(
         &self,
-        request: ReadResourceRequestParam,
+        request: ReadResourceRequestParams,
         context: RequestContext<RoleServer>,
     ) -> Result<ReadResourceResult, ErrorData> {
         match &self.resources {
@@ -218,7 +218,7 @@ where
 
     async fn subscribe(
         &self,
-        request: SubscribeRequestParam,
+        request: SubscribeRequestParams,
         context: RequestContext<RoleServer>,
     ) -> Result<(), ErrorData> {
         match &self.resources {
@@ -233,7 +233,7 @@ where
 
     async fn unsubscribe(
         &self,
-        request: UnsubscribeRequestParam,
+        request: UnsubscribeRequestParams,
         context: RequestContext<RoleServer>,
     ) -> Result<(), ErrorData> {
         match &self.resources {
@@ -248,7 +248,7 @@ where
 
     async fn complete(
         &self,
-        request: CompleteRequestParam,
+        request: CompleteRequestParams,
         context: RequestContext<RoleServer>,
     ) -> Result<CompleteResult, ErrorData> {
         match &self.completion {
@@ -263,7 +263,7 @@ where
 
     async fn set_level(
         &self,
-        request: SetLevelRequestParam,
+        request: SetLevelRequestParams,
         context: RequestContext<RoleServer>,
     ) -> Result<(), ErrorData> {
         match &self.logging {
@@ -302,7 +302,7 @@ where
 impl ToolsProvider for Unset {
     async fn list_tools(
         &self,
-        _request: Option<PaginatedRequestParam>,
+        _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
         Err(ErrorData::new(
@@ -314,7 +314,7 @@ impl ToolsProvider for Unset {
 
     async fn call_tool(
         &self,
-        _request: CallToolRequestParam,
+        _request: CallToolRequestParams,
         _context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         Err(ErrorData::new(
@@ -328,7 +328,7 @@ impl ToolsProvider for Unset {
 impl PromptsProvider for Unset {
     async fn list_prompts(
         &self,
-        _request: Option<PaginatedRequestParam>,
+        _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListPromptsResult, ErrorData> {
         Err(ErrorData::new(
@@ -340,7 +340,7 @@ impl PromptsProvider for Unset {
 
     async fn get_prompt(
         &self,
-        _request: GetPromptRequestParam,
+        _request: GetPromptRequestParams,
         _context: RequestContext<RoleServer>,
     ) -> Result<GetPromptResult, ErrorData> {
         Err(ErrorData::new(
@@ -354,7 +354,7 @@ impl PromptsProvider for Unset {
 impl ResourcesProvider for Unset {
     async fn list_resources(
         &self,
-        _request: Option<PaginatedRequestParam>,
+        _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListResourcesResult, ErrorData> {
         Err(ErrorData::new(
@@ -366,7 +366,7 @@ impl ResourcesProvider for Unset {
 
     async fn list_resource_templates(
         &self,
-        _request: Option<PaginatedRequestParam>,
+        _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListResourceTemplatesResult, ErrorData> {
         Err(ErrorData::new(
@@ -378,7 +378,7 @@ impl ResourcesProvider for Unset {
 
     async fn read_resource(
         &self,
-        _request: ReadResourceRequestParam,
+        _request: ReadResourceRequestParams,
         _context: RequestContext<RoleServer>,
     ) -> Result<ReadResourceResult, ErrorData> {
         Err(ErrorData::new(
@@ -390,7 +390,7 @@ impl ResourcesProvider for Unset {
 
     async fn subscribe(
         &self,
-        _request: SubscribeRequestParam,
+        _request: SubscribeRequestParams,
         _context: RequestContext<RoleServer>,
     ) -> Result<(), ErrorData> {
         Err(ErrorData::new(
@@ -402,7 +402,7 @@ impl ResourcesProvider for Unset {
 
     async fn unsubscribe(
         &self,
-        _request: UnsubscribeRequestParam,
+        _request: UnsubscribeRequestParams,
         _context: RequestContext<RoleServer>,
     ) -> Result<(), ErrorData> {
         Err(ErrorData::new(
@@ -416,7 +416,7 @@ impl ResourcesProvider for Unset {
 impl CompletionProvider for Unset {
     async fn complete(
         &self,
-        _request: CompleteRequestParam,
+        _request: CompleteRequestParams,
         _context: RequestContext<RoleServer>,
     ) -> Result<CompleteResult, ErrorData> {
         Err(ErrorData::new(
@@ -430,7 +430,7 @@ impl CompletionProvider for Unset {
 impl LoggingProvider for Unset {
     async fn set_level(
         &self,
-        _request: SetLevelRequestParam,
+        _request: SetLevelRequestParams,
         _context: RequestContext<RoleServer>,
     ) -> Result<(), ErrorData> {
         Err(ErrorData::new(

@@ -69,8 +69,8 @@ impl<T, P, R, C, L, I> Server<T, P, R, C, L, I> {
 mod tests {
     use super::*;
     use rmcp::model::{
-        CallToolRequestParam, ErrorData, GetPromptRequestParam, GetPromptResult, ListPromptsResult,
-        ListToolsResult, PaginatedRequestParam,
+        CallToolRequestParams, ErrorData, GetPromptRequestParams, GetPromptResult,
+        ListPromptsResult, ListToolsResult, PaginatedRequestParams,
     };
     use rmcp::service::RequestContext;
 
@@ -80,7 +80,7 @@ mod tests {
     impl ToolsProvider for TestToolsProvider {
         async fn list_tools(
             &self,
-            _request: Option<PaginatedRequestParam>,
+            _request: Option<PaginatedRequestParams>,
             _context: RequestContext<rmcp::service::RoleServer>,
         ) -> Result<ListToolsResult, ErrorData> {
             Ok(ListToolsResult::with_all_items(vec![]))
@@ -88,7 +88,7 @@ mod tests {
 
         async fn call_tool(
             &self,
-            _request: CallToolRequestParam,
+            _request: CallToolRequestParams,
             _context: RequestContext<rmcp::service::RoleServer>,
         ) -> Result<rmcp::model::CallToolResult, ErrorData> {
             Ok(rmcp::model::CallToolResult::success(vec![
@@ -105,7 +105,7 @@ mod tests {
     impl PromptsProvider for TestPromptsProvider {
         async fn list_prompts(
             &self,
-            _request: Option<PaginatedRequestParam>,
+            _request: Option<PaginatedRequestParams>,
             _context: RequestContext<rmcp::service::RoleServer>,
         ) -> Result<ListPromptsResult, ErrorData> {
             Ok(ListPromptsResult::with_all_items(vec![]))
@@ -113,7 +113,7 @@ mod tests {
 
         async fn get_prompt(
             &self,
-            request: GetPromptRequestParam,
+            request: GetPromptRequestParams,
             _context: RequestContext<rmcp::service::RoleServer>,
         ) -> Result<GetPromptResult, ErrorData> {
             if request.name == self.prompt_name {

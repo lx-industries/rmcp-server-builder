@@ -9,7 +9,7 @@ keywords = ["mcp", "rmcp", "modelcontextprotocol", "server", "builder"]
 categories = ["development-tools"]
 
 [dependencies]
-rmcp = { version = "0.13", features = ["server"] }
+rmcp = { version = "0.14", features = ["server"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
