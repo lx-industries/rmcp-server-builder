@@ -117,10 +117,7 @@ mod tests {
             _context: RequestContext<rmcp::service::RoleServer>,
         ) -> Result<GetPromptResult, ErrorData> {
             if request.name == self.prompt_name {
-                Ok(GetPromptResult {
-                    description: Some("Test prompt".into()),
-                    messages: vec![],
-                })
+                Ok(GetPromptResult::new(vec![]).with_description("Test prompt"))
             } else {
                 Err(ErrorData::invalid_params("Unknown prompt", None))
             }
@@ -130,11 +127,7 @@ mod tests {
     #[test]
     fn test_builder_compiles() {
         let _server = ServerBuilder::new()
-            .info(Implementation {
-                name: "test".into(),
-                version: "1.0.0".into(),
-                ..Default::default()
-            })
+            .info(Implementation::new("test", "1.0.0"))
             .tools(TestToolsProvider)
             .prompts(TestPromptsProvider {
                 prompt_name: "test_prompt".into(),
@@ -145,11 +138,7 @@ mod tests {
     #[test]
     fn test_server_builder_static_method() {
         let _server = Server::<Unset, Unset, Unset, Unset, Unset, Unset>::builder()
-            .info(Implementation {
-                name: "test".into(),
-                version: "1.0.0".into(),
-                ..Default::default()
-            })
+            .info(Implementation::new("test", "1.0.0"))
             .build();
     }
 }

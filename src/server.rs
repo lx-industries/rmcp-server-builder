@@ -85,10 +85,12 @@ where
     I: ServerInfoProvider,
 {
     fn get_info(&self) -> ServerInfo {
-        let mut info = self.info.get_info();
-        info.capabilities = self.combined_capabilities();
-        if self.instructions.is_some() {
-            info.instructions = self.instructions.clone();
+        let base = self.info.get_info();
+        let mut info = ServerInfo::new(self.combined_capabilities())
+            .with_protocol_version(base.protocol_version)
+            .with_server_info(base.server_info);
+        if let Some(instructions) = self.instructions.clone().or(base.instructions) {
+            info = info.with_instructions(instructions);
         }
         info
     }
@@ -99,12 +101,13 @@ where
         _context: RequestContext<RoleServer>,
     ) -> Result<InitializeResult, ErrorData> {
         let base = self.info.get_info();
-        Ok(InitializeResult {
-            protocol_version: base.protocol_version,
-            capabilities: self.combined_capabilities(),
-            server_info: base.server_info,
-            instructions: self.instructions.clone().or(base.instructions),
-        })
+        let mut result = InitializeResult::new(self.combined_capabilities())
+            .with_protocol_version(base.protocol_version)
+            .with_server_info(base.server_info);
+        if let Some(instructions) = self.instructions.clone().or(base.instructions) {
+            result = result.with_instructions(instructions);
+        }
+        Ok(result)
     }
 
     async fn ping(&self, _context: RequestContext<RoleServer>) -> Result<(), ErrorData> {
