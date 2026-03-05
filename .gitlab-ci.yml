@@ -1,6 +1,7 @@
 # Include Rust-specific CI configuration
 include:
   - local: '.gitlab/ci/rust.gitlab-ci.yml'
+  - local: '.gitlab/ci/devcontainer.gitlab-ci.yml'
 
 # Global variables for package versions
 variables:

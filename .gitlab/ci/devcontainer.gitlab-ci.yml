@@ -1,0 +1,36 @@
+# Docker-in-Docker template for devcontainer build
+.docker:
+  # renovate: datasource=docker depName=docker
+  image: docker:28@sha256:2a232a42256f70d78e3cc5d2b5d6b3276710a0de0596c145f627ecfae90282ac
+  services:
+    # renovate: datasource=docker depName=docker
+    - docker:28-dind@sha256:2a232a42256f70d78e3cc5d2b5d6b3276710a0de0596c145f627ecfae90282ac
+  tags:
+    - docker-in-docker
+
+# Validate devcontainer.json against the spec schema (no Docker required)
+devcontainer:validate:
+  # renovate: datasource=docker depName=ghcr.io/astral-sh/uv
+  image: ghcr.io/astral-sh/uv:python3.13-bookworm@sha256:47965cdc9d53a515f68f78241161c901e70051ce428f12e791bd7fe19f6a631a
+  stage: lint
+  script:
+    - uvx check-jsonschema --schemafile "https://raw.githubusercontent.com/devcontainers/spec/main/schemas/devContainer.schema.json" .devcontainer/devcontainer.json
+  rules:
+    - changes:
+        - .devcontainer/**/*
+        - .gitlab-ci.yml
+        - .gitlab/ci/devcontainer.gitlab-ci.yml
+  interruptible: true
+
+# Build the devcontainer image (requires DinD)
+devcontainer:build:
+  extends: .docker
+  stage: build
+  script:
+    - docker build .devcontainer/
+  rules:
+    - changes:
+        - .devcontainer/**/*
+        - .gitlab-ci.yml
+        - .gitlab/ci/devcontainer.gitlab-ci.yml
+  interruptible: true

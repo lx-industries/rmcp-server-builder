@@ -1,0 +1,22 @@
+# Allowed outbound domains — one per line, comments start with #.
+# The firewall resolves these to IPs at container start and blocks everything else.
+
+# Claude API
+api.anthropic.com
+statsig.anthropic.com
+sentry.io
+
+# Claude Code distribution (always GitHub, regardless of project forge)
+github.com
+api.github.com
+
+# Package registries — npm (Claude Code MCP servers)
+registry.npmjs.org
+
+# Package registries — Cargo (Rust)
+crates.io
+static.crates.io
+index.crates.io
+
+# Project forge
+gitlab.com
