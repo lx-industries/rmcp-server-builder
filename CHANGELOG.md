@@ -1,3 +1,11 @@
+## [0.1.12](https://gitlab.com/lx-industries/rmcp-server-builder/compare/v0.1.11...v0.1.12) (2026-03-09)
+
+
+### Miscellaneous Chores
+
+* **deps:** update rust crate rmcp to v1.1.1 ([6f1bbe0](https://gitlab.com/lx-industries/rmcp-server-builder/commit/6f1bbe0ff532cba6f51a1b7673aac9200a84153e))
+* **deps:** update rust docker tag to v1.94.0 ([8e3b5a6](https://gitlab.com/lx-industries/rmcp-server-builder/commit/8e3b5a6abca37a963f08a23ad0e76ff195293aa3))
+
 ## [0.1.11](https://gitlab.com/lx-industries/rmcp-server-builder/compare/v0.1.10...v0.1.11) (2026-03-05)
 
 
