@@ -1,3 +1,13 @@
+## [0.1.14](https://gitlab.com/lx-industries/rmcp-server-builder/compare/v0.1.13...v0.1.14) (2026-03-23)
+
+
+### Miscellaneous Chores
+
+* **deps:** update node.js to 5a593d7 ([a6c198d](https://gitlab.com/lx-industries/rmcp-server-builder/commit/a6c198d71d1de953e4bbb1fd0a5f177372e13018))
+* **deps:** update node.js to 6de4ce7 ([09f185c](https://gitlab.com/lx-industries/rmcp-server-builder/commit/09f185cf8fbff1230ae3ed347669173d285f3038))
+* **deps:** update rust:1.94.0 docker digest to 72724f1 ([d593b2f](https://gitlab.com/lx-industries/rmcp-server-builder/commit/d593b2f35c2736b862384e91f8ccadf8fc987c8e))
+* **deps:** update rust:1.94.0 docker digest to f17e723 ([1b4ac67](https://gitlab.com/lx-industries/rmcp-server-builder/commit/1b4ac67fba5330cf99c6eec3d7229b56e3f407f5))
+
 ## [0.1.13](https://gitlab.com/lx-industries/rmcp-server-builder/compare/v0.1.12...v0.1.13) (2026-03-16)
 
 
