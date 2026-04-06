@@ -1,3 +1,10 @@
+## [0.1.16](https://gitlab.com/lx-industries/rmcp-server-builder/compare/v0.1.15...v0.1.16) (2026-04-06)
+
+
+### Miscellaneous Chores
+
+* **deps:** update rust crate tokio to v1.51.0 ([88d44fc](https://gitlab.com/lx-industries/rmcp-server-builder/commit/88d44fcc5582e5a06a1da085e72a7ce6887353d4))
+
 ## [0.1.15](https://gitlab.com/lx-industries/rmcp-server-builder/compare/v0.1.14...v0.1.15) (2026-03-30)
 
 
