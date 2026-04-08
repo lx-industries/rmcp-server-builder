@@ -1,10 +1,10 @@
 # Docker-in-Docker template for devcontainer build
 .docker:
   # renovate: datasource=docker depName=docker
-  image: docker:28@sha256:2a232a42256f70d78e3cc5d2b5d6b3276710a0de0596c145f627ecfae90282ac
+  image: docker:29@sha256:f80c26212befc1c1988b529495532c6b9180d9b1dab1611f4a1efbe9da8ec821
   services:
     # renovate: datasource=docker depName=docker
-    - docker:28-dind@sha256:2a232a42256f70d78e3cc5d2b5d6b3276710a0de0596c145f627ecfae90282ac
+    - docker:29-dind@sha256:f80c26212befc1c1988b529495532c6b9180d9b1dab1611f4a1efbe9da8ec821
   tags:
     - docker-in-docker
 
