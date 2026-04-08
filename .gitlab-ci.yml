@@ -5,14 +5,23 @@ include:
 
 # Global variables for package versions
 variables:
+  # renovate: datasource=npm depName=@commitlint/cli
   COMMITLINT_CLI_VERSION: "17.6.1"
+  # renovate: datasource=npm depName=@commitlint/config-conventional
   COMMITLINT_CONFIG_VERSION: "17.6.1"
+  # renovate: datasource=npm depName=semantic-release
   SEMANTIC_RELEASE_VERSION: "21.0.7"
+  # renovate: datasource=npm depName=@semantic-release/changelog
   SEMANTIC_RELEASE_CHANGELOG_VERSION: "6.0.3"
+  # renovate: datasource=npm depName=@semantic-release/git
   SEMANTIC_RELEASE_GIT_VERSION: "10.0.1"
+  # renovate: datasource=npm depName=@semantic-release/gitlab
   SEMANTIC_RELEASE_GITLAB_VERSION: "12.1.1"
+  # renovate: datasource=npm depName=@semantic-release/exec
   SEMANTIC_RELEASE_EXEC_VERSION: "6.0.3"
+  # renovate: datasource=github-releases depName=semantic-release-cargo/semantic-release-cargo
   SEMANTIC_RELEASE_CARGO_VERSION: "2.4.44"
+  # renovate: datasource=npm depName=conventional-changelog-conventionalcommits
   CONVENTIONAL_CHANGELOG_CONVENTIONALCOMMITS_VERSION: "7.0.2"
 
 # Workflow rules for automatic pipeline cancellation
