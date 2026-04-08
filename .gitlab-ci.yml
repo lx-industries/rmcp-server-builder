@@ -6,9 +6,9 @@ include:
 # Global variables for package versions
 variables:
   # renovate: datasource=npm depName=@commitlint/cli
-  COMMITLINT_CLI_VERSION: "17.6.1"
+  COMMITLINT_CLI_VERSION: "17.8.1"
   # renovate: datasource=npm depName=@commitlint/config-conventional
-  COMMITLINT_CONFIG_VERSION: "17.6.1"
+  COMMITLINT_CONFIG_VERSION: "17.8.1"
   # renovate: datasource=npm depName=semantic-release
   SEMANTIC_RELEASE_VERSION: "21.1.2"
   # renovate: datasource=npm depName=@semantic-release/changelog
