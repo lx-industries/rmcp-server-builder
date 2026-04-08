@@ -10,7 +10,7 @@ variables:
   # renovate: datasource=npm depName=@commitlint/config-conventional
   COMMITLINT_CONFIG_VERSION: "17.6.1"
   # renovate: datasource=npm depName=semantic-release
-  SEMANTIC_RELEASE_VERSION: "21.0.7"
+  SEMANTIC_RELEASE_VERSION: "21.1.2"
   # renovate: datasource=npm depName=@semantic-release/changelog
   SEMANTIC_RELEASE_CHANGELOG_VERSION: "6.0.3"
   # renovate: datasource=npm depName=@semantic-release/git
