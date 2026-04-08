@@ -20,7 +20,7 @@ variables:
   # renovate: datasource=npm depName=@semantic-release/exec
   SEMANTIC_RELEASE_EXEC_VERSION: "6.0.3"
   # renovate: datasource=github-releases depName=semantic-release-cargo/semantic-release-cargo
-  SEMANTIC_RELEASE_CARGO_VERSION: "2.4.44"
+  SEMANTIC_RELEASE_CARGO_VERSION: "2.4.84"
   # renovate: datasource=npm depName=conventional-changelog-conventionalcommits
   CONVENTIONAL_CHANGELOG_CONVENTIONALCOMMITS_VERSION: "7.0.2"
 
