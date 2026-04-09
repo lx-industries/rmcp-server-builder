@@ -31,7 +31,6 @@
     - curl -L https://github.com/semantic-release-cargo/semantic-release-cargo/releases/download/v${SEMANTIC_RELEASE_CARGO_VERSION}/semantic-release-cargo-x86_64-unknown-linux-musl -o /usr/local/bin/semantic-release-cargo
     - chmod +x /usr/local/bin/semantic-release-cargo
     - semantic-release-cargo --version
-  interruptible: true
 
 # Semantic release config lint job - validate semantic-release configuration
 semantic-release-lint:

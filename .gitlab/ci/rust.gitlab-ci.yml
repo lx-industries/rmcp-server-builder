@@ -40,7 +40,6 @@
   before_script:
     - rustc --version
     - cargo --version
-  interruptible: true
 
 # Build job - compile the project
 build:

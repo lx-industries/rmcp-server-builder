@@ -20,7 +20,6 @@ devcontainer:validate:
         - .devcontainer/**/*
         - .gitlab-ci.yml
         - .gitlab/ci/devcontainer.gitlab-ci.yml
-  interruptible: true
 
 # Build the devcontainer image (requires DinD)
 devcontainer:build:
@@ -33,4 +32,3 @@ devcontainer:build:
         - .devcontainer/**/*
         - .gitlab-ci.yml
         - .gitlab/ci/devcontainer.gitlab-ci.yml
-  interruptible: true

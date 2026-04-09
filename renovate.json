@@ -6,6 +6,26 @@
       "matchPackageNames": ["rust"],
       "matchDatasources": ["docker"],
       "schedule": ["on the first day of the month"]
+    },
+    {
+      "matchPackageNames": ["node"],
+      "matchDatasources": ["node-version"],
+      "schedule": ["on the first day of the month"]
+    },
+    {
+      "matchPackageNames": ["docker"],
+      "matchDatasources": ["docker"],
+      "schedule": ["on the first day of the month"]
+    },
+    {
+      "matchPackageNames": [
+        "semantic-release",
+        "semantic-release-cargo/semantic-release-cargo",
+        "@semantic-release/*",
+        "conventional-changelog-conventionalcommits"
+      ],
+      "groupName": "semantic release",
+      "schedule": ["on the first day of the month"]
     }
   ],
   "customManagers": [
