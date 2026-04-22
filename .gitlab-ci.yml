@@ -48,7 +48,7 @@ stages:
 
 # Commit lint job - check commit message format
 commitlint:
-  image: node:24.15.0@sha256:29f7199e3b736f3649a20ea461fcebb44c847387c02dc5d4fa9ace29dc9b51d9
+  image: node:24.15.0@sha256:807109d6e7a6028176d655d9b4b7b89284634263598a8eb0196477bc892cb89e
   stage: lint
   rules:
     - if: '$CI_PIPELINE_SOURCE == "push"'
