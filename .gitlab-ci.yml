@@ -7,9 +7,9 @@ include:
 # Global variables for package versions
 variables:
   # renovate: datasource=npm depName=@commitlint/cli
-  COMMITLINT_CLI_VERSION: "20.5.2"
+  COMMITLINT_CLI_VERSION: "20.5.3"
   # renovate: datasource=npm depName=@commitlint/config-conventional
-  COMMITLINT_CONFIG_VERSION: "20.5.0"
+  COMMITLINT_CONFIG_VERSION: "20.5.3"
 
 default:
   interruptible: true
