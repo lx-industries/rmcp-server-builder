@@ -28,7 +28,7 @@
     # Install semantic-release and plugins
     - npm install -g semantic-release@${SEMANTIC_RELEASE_VERSION} @semantic-release/changelog@${SEMANTIC_RELEASE_CHANGELOG_VERSION} @semantic-release/git@${SEMANTIC_RELEASE_GIT_VERSION} @semantic-release/gitlab@${SEMANTIC_RELEASE_GITLAB_VERSION} @semantic-release/exec@${SEMANTIC_RELEASE_EXEC_VERSION} conventional-changelog-conventionalcommits@${CONVENTIONAL_CHANGELOG_CONVENTIONALCOMMITS_VERSION}
     # Install semantic-release-cargo static binary
-    - curl -L https://github.com/semantic-release-cargo/semantic-release-cargo/releases/download/v${SEMANTIC_RELEASE_CARGO_VERSION}/semantic-release-cargo-x86_64-unknown-linux-musl -o /usr/local/bin/semantic-release-cargo
+    - curl -fL https://github.com/semantic-release-cargo/semantic-release-cargo/releases/download/v${SEMANTIC_RELEASE_CARGO_VERSION}/semantic-release-cargo-x86_64-unknown-linux-musl -o /usr/local/bin/semantic-release-cargo
     - chmod +x /usr/local/bin/semantic-release-cargo
     - semantic-release-cargo --version
 
