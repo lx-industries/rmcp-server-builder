@@ -41,7 +41,10 @@ semantic-release-lint:
 
 # Semantic release job - automated versioning and releases
 semantic-release:
-  <<: *semantic-release-template
+  # Use `extends` (deep-merges `variables`) instead of the YAML merge key `<<`,
+  # whose shallow merge made this job's own `variables:` block replace the
+  # template's, leaving every SEMANTIC_RELEASE_*_VERSION empty.
+  extends: .semantic-release-template
   stage: release
   interruptible: false
   rules:
