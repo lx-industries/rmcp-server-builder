@@ -2,7 +2,7 @@
 
 # -- Base image (reused from CI) -----------------------------------------------
 # renovate: datasource=docker depName=rust
-FROM rust:1.97.1@sha256:b1b3c9c0d921d7fa0a6d1f9ec7e4eab87f8c8ec97644c3d791450f131dec813f
+FROM rust:1.98.0@sha256:271849e998ffce5776454bbf98c5dc21baafc854ff8e566197908d3aca9a81e8
 
 # -- Environment (set early so tool installers use the right paths) ------------
 ENV HOME=/tmp/home
