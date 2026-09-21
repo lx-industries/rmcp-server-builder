@@ -1,3 +1,11 @@
+## [0.1.19](https://gitlab.com/lx-industries/rmcp-server-builder/compare/v0.1.18...v0.1.19) (2026-09-21)
+
+
+### Miscellaneous Chores
+
+* **deps:** update node.js to 2255392 ([ce1dfd9](https://gitlab.com/lx-industries/rmcp-server-builder/commit/ce1dfd9afdca3c5a68e6ddc75001cf2906664f24))
+* **deps:** update node.js to 64af381 ([26f4f0a](https://gitlab.com/lx-industries/rmcp-server-builder/commit/26f4f0a6a1e0231d3f7afacf14c2b85c34cb7ab3))
+
 ## [0.1.18](https://gitlab.com/lx-industries/rmcp-server-builder/compare/v0.1.17...v0.1.18) (2026-09-14)
 
 
