@@ -1,14 +1,15 @@
 //! End-to-end tests: an rmcp client talks to a composed `Server` over a duplex transport.
 
 use rmcp::{
-    ServiceExt,
+    ClientLifecycleMode, ClientServiceExt, ServerHandler, ServiceExt,
     model::{
         CallToolRequestParams, CallToolResponse, CallToolResult, ClientCapabilities, ClientConfig,
         ContentBlock, CreateTaskResult, ErrorCode, ErrorData, GetPromptRequestParams,
-        GetPromptResponse, GetPromptResult, Implementation, ListPromptsResult,
+        GetPromptResponse, GetPromptResult, Implementation, InputRequiredResult, ListPromptsResult,
         ListResourceTemplatesResult, ListResourcesResult, ListToolsResult, PaginatedRequestParams,
         ProtocolVersion, ReadResourceRequestParams, ReadResourceResponse, ReadResourceResult,
-        ResourceContents, SubscribeRequestParams, Task, TaskStatus, UnsubscribeRequestParams,
+        ResourceContents, ServerConfig, SubscribeRequestParams, Task, TaskStatus,
+        UnsubscribeRequestParams,
     },
     service::{RequestContext, RoleServer, ServiceError},
 };
@@ -18,6 +19,7 @@ const TOOL_TEXT: &str = "tool ran";
 const PROMPT_DESCRIPTION: &str = "a prompt";
 const RESOURCE_URI: &str = "test://resource";
 const RESOURCE_TEXT: &str = "resource body";
+const REQUEST_STATE: &str = "state-1";
 
 struct Tools;
 
@@ -63,6 +65,26 @@ impl ToolsProvider for TaskTools {
             "2026-10-06T00:00:00Z",
         );
         Ok(CreateTaskResult::new(task).into())
+    }
+}
+
+/// A `ServerHandler` whose `get_prompt` asks the client for input (SEP-2322).
+///
+/// The composed server uses it as a prompts provider through the blanket
+/// `impl<T: ServerHandler> PromptsProvider for T`.
+struct InputRequiredHandler;
+
+impl ServerHandler for InputRequiredHandler {
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::default()
+    }
+
+    async fn get_prompt(
+        &self,
+        _request: GetPromptRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<GetPromptResponse, ErrorData> {
+        Ok(InputRequiredResult::new(None, Some(REQUEST_STATE.into())).into())
     }
 }
 
@@ -257,6 +279,42 @@ async fn a_task_from_a_tools_provider_is_answered_with_an_internal_error() {
         "message names tasks/*: {}",
         error.message
     );
+
+    client.cancel().await.expect("cancel client");
+    server_task.await.expect("server task");
+}
+
+#[tokio::test]
+async fn a_server_handler_provider_passes_input_required_through() {
+    let (server_transport, client_transport) = tokio::io::duplex(4096);
+    let server = ServerBuilder::new()
+        .info(Implementation::new("test-server", "1.0.0"))
+        .prompts(InputRequiredHandler)
+        .build();
+    let server_task = tokio::spawn(async move {
+        let running = server.serve(server_transport).await.expect("serve server");
+        running.waiting().await.expect("server stops");
+    });
+
+    let client = client_configuration(ProtocolVersion::V_2026_07_28)
+        .serve_with_lifecycle(
+            client_transport,
+            ClientLifecycleMode::Discover {
+                preferred_versions: vec![ProtocolVersion::V_2026_07_28],
+            },
+        )
+        .await
+        .expect("discover server");
+
+    let response = client
+        .get_prompt_once(GetPromptRequestParams::new("any"))
+        .await
+        .expect("get prompt");
+
+    let GetPromptResponse::InputRequired(input_required) = response else {
+        panic!("expected an input-required response, got {response:?}");
+    };
+    assert_eq!(input_required.request_state.as_deref(), Some(REQUEST_STATE));
 
     client.cancel().await.expect("cancel client");
     server_task.await.expect("server task");
