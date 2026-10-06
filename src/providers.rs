@@ -7,14 +7,20 @@
 use rmcp::{
     handler::server::ServerHandler,
     model::{
-        CallToolRequestParams, CallToolResult, CompleteRequestParams, CompleteResult, ErrorData,
-        GetPromptRequestParams, GetPromptResult, ListPromptsResult, ListResourceTemplatesResult,
+        CallToolRequestParams, CallToolResponse, CompleteRequestParams, CompleteResult, ErrorData,
+        GetPromptRequestParams, GetPromptResponse, ListPromptsResult, ListResourceTemplatesResult,
         ListResourcesResult, ListToolsResult, PaginatedRequestParams, ReadResourceRequestParams,
-        ReadResourceResult, ServerCapabilities, ServerInfo, SetLevelRequestParams,
-        SubscribeRequestParams, UnsubscribeRequestParams,
+        ReadResourceResponse, ServerCapabilities, ServerConfig, SubscribeRequestParams,
+        UnsubscribeRequestParams,
     },
     service::{RequestContext, RoleServer},
 };
+
+#[expect(
+    deprecated,
+    reason = "rmcp 3.x deprecates logging (SEP-2577); legacy protocol versions still dispatch logging/setLevel"
+)]
+use rmcp::model::SetLevelRequestParams;
 
 /// Provider for tools capability.
 ///
@@ -32,7 +38,7 @@ pub trait ToolsProvider: Send + Sync + 'static {
         &self,
         request: CallToolRequestParams,
         context: RequestContext<RoleServer>,
-    ) -> impl Future<Output = Result<CallToolResult, ErrorData>> + Send;
+    ) -> impl Future<Output = Result<CallToolResponse, ErrorData>> + Send;
 }
 
 /// Provider for prompts capability.
@@ -51,7 +57,7 @@ pub trait PromptsProvider: Send + Sync + 'static {
         &self,
         request: GetPromptRequestParams,
         context: RequestContext<RoleServer>,
-    ) -> impl Future<Output = Result<GetPromptResult, ErrorData>> + Send;
+    ) -> impl Future<Output = Result<GetPromptResponse, ErrorData>> + Send;
 }
 
 /// Provider for resources capability.
@@ -77,7 +83,7 @@ pub trait ResourcesProvider: Send + Sync + 'static {
         &self,
         request: ReadResourceRequestParams,
         context: RequestContext<RoleServer>,
-    ) -> impl Future<Output = Result<ReadResourceResult, ErrorData>> + Send;
+    ) -> impl Future<Output = Result<ReadResourceResponse, ErrorData>> + Send;
 
     /// Subscribe to resource updates.
     fn subscribe(
@@ -111,6 +117,10 @@ pub trait CompletionProvider: Send + Sync + 'static {
 /// Implement this trait to handle logging level changes.
 pub trait LoggingProvider: Send + Sync + 'static {
     /// Set the logging level.
+    #[expect(
+        deprecated,
+        reason = "rmcp 3.x deprecates logging (SEP-2577); legacy protocol versions still dispatch logging/setLevel"
+    )]
     fn set_level(
         &self,
         request: SetLevelRequestParams,
@@ -123,7 +133,7 @@ pub trait LoggingProvider: Send + Sync + 'static {
 /// This is required for any composed server.
 pub trait ServerInfoProvider: Send + Sync + 'static {
     /// Get the server info and capabilities.
-    fn get_info(&self) -> ServerInfo;
+    fn get_info(&self) -> ServerConfig;
 
     /// Get the base capabilities (before provider-based adjustments).
     fn capabilities(&self) -> ServerCapabilities {
@@ -148,7 +158,7 @@ impl<T: ServerHandler> ToolsProvider for T {
         &self,
         request: CallToolRequestParams,
         context: RequestContext<RoleServer>,
-    ) -> Result<CallToolResult, ErrorData> {
+    ) -> Result<CallToolResponse, ErrorData> {
         ServerHandler::call_tool(self, request, context).await
     }
 }
@@ -166,7 +176,7 @@ impl<T: ServerHandler> PromptsProvider for T {
         &self,
         request: GetPromptRequestParams,
         context: RequestContext<RoleServer>,
-    ) -> Result<GetPromptResult, ErrorData> {
+    ) -> Result<GetPromptResponse, ErrorData> {
         ServerHandler::get_prompt(self, request, context).await
     }
 }
@@ -192,10 +202,14 @@ impl<T: ServerHandler> ResourcesProvider for T {
         &self,
         request: ReadResourceRequestParams,
         context: RequestContext<RoleServer>,
-    ) -> Result<ReadResourceResult, ErrorData> {
+    ) -> Result<ReadResourceResponse, ErrorData> {
         ServerHandler::read_resource(self, request, context).await
     }
 
+    #[expect(
+        deprecated,
+        reason = "rmcp 3.x keeps resources/subscribe and resources/unsubscribe for legacy protocol versions"
+    )]
     async fn subscribe(
         &self,
         request: SubscribeRequestParams,
@@ -204,6 +218,10 @@ impl<T: ServerHandler> ResourcesProvider for T {
         ServerHandler::subscribe(self, request, context).await
     }
 
+    #[expect(
+        deprecated,
+        reason = "rmcp 3.x keeps resources/subscribe and resources/unsubscribe for legacy protocol versions"
+    )]
     async fn unsubscribe(
         &self,
         request: UnsubscribeRequestParams,
@@ -224,6 +242,10 @@ impl<T: ServerHandler> CompletionProvider for T {
 }
 
 impl<T: ServerHandler> LoggingProvider for T {
+    #[expect(
+        deprecated,
+        reason = "rmcp 3.x deprecates logging (SEP-2577); legacy protocol versions still dispatch logging/setLevel"
+    )]
     async fn set_level(
         &self,
         request: SetLevelRequestParams,

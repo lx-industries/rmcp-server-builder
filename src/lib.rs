@@ -69,8 +69,9 @@ impl<T, P, R, C, L, I> Server<T, P, R, C, L, I> {
 mod tests {
     use super::*;
     use rmcp::model::{
-        CallToolRequestParams, ErrorData, GetPromptRequestParams, GetPromptResult,
-        ListPromptsResult, ListToolsResult, PaginatedRequestParams,
+        CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, ErrorData,
+        GetPromptRequestParams, GetPromptResponse, GetPromptResult, ListPromptsResult,
+        ListToolsResult, PaginatedRequestParams,
     };
     use rmcp::service::RequestContext;
 
@@ -90,10 +91,8 @@ mod tests {
             &self,
             _request: CallToolRequestParams,
             _context: RequestContext<rmcp::service::RoleServer>,
-        ) -> Result<rmcp::model::CallToolResult, ErrorData> {
-            Ok(rmcp::model::CallToolResult::success(vec![
-                rmcp::model::Content::text("Tool executed"),
-            ]))
+        ) -> Result<CallToolResponse, ErrorData> {
+            Ok(CallToolResult::success(vec![ContentBlock::text("Tool executed")]).into())
         }
     }
 
@@ -115,9 +114,11 @@ mod tests {
             &self,
             request: GetPromptRequestParams,
             _context: RequestContext<rmcp::service::RoleServer>,
-        ) -> Result<GetPromptResult, ErrorData> {
+        ) -> Result<GetPromptResponse, ErrorData> {
             if request.name == self.prompt_name {
-                Ok(GetPromptResult::new(vec![]).with_description("Test prompt"))
+                Ok(GetPromptResult::new(vec![])
+                    .with_description("Test prompt")
+                    .into())
             } else {
                 Err(ErrorData::invalid_params("Unknown prompt", None))
             }

@@ -1,6 +1,6 @@
 //! Builder for composing MCP servers from individual capability providers.
 
-use rmcp::model::{Implementation, ServerCapabilities, ServerInfo};
+use rmcp::model::{Implementation, ServerCapabilities, ServerConfig};
 
 use crate::providers::{
     CompletionProvider, LoggingProvider, PromptsProvider, ResourcesProvider, ServerInfoProvider,
@@ -181,8 +181,8 @@ where
 // =============================================================================
 
 impl ServerInfoProvider for Implementation {
-    fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::default()).with_server_info(self.clone())
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(ServerCapabilities::default()).with_server_info(self.clone())
     }
 }
 
@@ -210,8 +210,8 @@ impl SimpleInfo {
 }
 
 impl ServerInfoProvider for SimpleInfo {
-    fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(self.capabilities.clone()).with_server_info(self.server_info.clone())
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(self.capabilities.clone()).with_server_info(self.server_info.clone())
     }
 
     fn capabilities(&self) -> ServerCapabilities {

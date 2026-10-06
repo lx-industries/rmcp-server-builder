@@ -3,16 +3,22 @@
 use rmcp::{
     handler::server::ServerHandler,
     model::{
-        CallToolRequestParams, CallToolResult, CancelledNotificationParam, CompleteRequestParams,
-        CompleteResult, ErrorCode, ErrorData, GetPromptRequestParams, GetPromptResult,
+        CallToolRequestParams, CallToolResponse, CancelledNotificationParam, CompleteRequestParams,
+        CompleteResult, ErrorCode, ErrorData, GetPromptRequestParams, GetPromptResponse,
         InitializeRequestParams, InitializeResult, JsonObject, ListPromptsResult,
         ListResourceTemplatesResult, ListResourcesResult, ListToolsResult, PaginatedRequestParams,
         ProgressNotificationParam, PromptsCapability, ReadResourceRequestParams,
-        ReadResourceResult, ResourcesCapability, ServerCapabilities, ServerInfo,
-        SetLevelRequestParams, SubscribeRequestParams, ToolsCapability, UnsubscribeRequestParams,
+        ReadResourceResponse, ResourcesCapability, ServerCapabilities, ServerConfig,
+        SubscribeRequestParams, ToolsCapability, UnsubscribeRequestParams,
     },
     service::{NotificationContext, RequestContext, RoleServer},
 };
+
+#[expect(
+    deprecated,
+    reason = "rmcp 3.x deprecates logging (SEP-2577); legacy protocol versions still dispatch logging/setLevel"
+)]
+use rmcp::model::SetLevelRequestParams;
 
 use crate::providers::{
     CompletionProvider, LoggingProvider, PromptsProvider, ResourcesProvider, ServerInfoProvider,
@@ -84,9 +90,9 @@ where
     L: LoggingProvider,
     I: ServerInfoProvider,
 {
-    fn get_info(&self) -> ServerInfo {
+    fn get_info(&self) -> ServerConfig {
         let base = self.info.get_info();
-        let mut info = ServerInfo::new(self.combined_capabilities())
+        let mut info = ServerConfig::new(self.combined_capabilities())
             .with_protocol_version(base.protocol_version)
             .with_server_info(base.server_info);
         if let Some(instructions) = self.instructions.clone().or(base.instructions) {
@@ -133,7 +139,7 @@ where
         &self,
         request: CallToolRequestParams,
         context: RequestContext<RoleServer>,
-    ) -> Result<CallToolResult, ErrorData> {
+    ) -> Result<CallToolResponse, ErrorData> {
         match &self.tools {
             Some(provider) => provider.call_tool(request, context).await,
             None => Err(ErrorData::new(
@@ -163,7 +169,7 @@ where
         &self,
         request: GetPromptRequestParams,
         context: RequestContext<RoleServer>,
-    ) -> Result<GetPromptResult, ErrorData> {
+    ) -> Result<GetPromptResponse, ErrorData> {
         match &self.prompts {
             Some(provider) => provider.get_prompt(request, context).await,
             None => Err(ErrorData::new(
@@ -208,7 +214,7 @@ where
         &self,
         request: ReadResourceRequestParams,
         context: RequestContext<RoleServer>,
-    ) -> Result<ReadResourceResult, ErrorData> {
+    ) -> Result<ReadResourceResponse, ErrorData> {
         match &self.resources {
             Some(provider) => provider.read_resource(request, context).await,
             None => Err(ErrorData::new(
@@ -264,6 +270,10 @@ where
         }
     }
 
+    #[expect(
+        deprecated,
+        reason = "rmcp 3.x deprecates logging (SEP-2577); legacy protocol versions still dispatch logging/setLevel"
+    )]
     async fn set_level(
         &self,
         request: SetLevelRequestParams,
@@ -319,7 +329,7 @@ impl ToolsProvider for Unset {
         &self,
         _request: CallToolRequestParams,
         _context: RequestContext<RoleServer>,
-    ) -> Result<CallToolResult, ErrorData> {
+    ) -> Result<CallToolResponse, ErrorData> {
         Err(ErrorData::new(
             ErrorCode::METHOD_NOT_FOUND,
             "tools not supported",
@@ -345,7 +355,7 @@ impl PromptsProvider for Unset {
         &self,
         _request: GetPromptRequestParams,
         _context: RequestContext<RoleServer>,
-    ) -> Result<GetPromptResult, ErrorData> {
+    ) -> Result<GetPromptResponse, ErrorData> {
         Err(ErrorData::new(
             ErrorCode::METHOD_NOT_FOUND,
             "prompts not supported",
@@ -383,7 +393,7 @@ impl ResourcesProvider for Unset {
         &self,
         _request: ReadResourceRequestParams,
         _context: RequestContext<RoleServer>,
-    ) -> Result<ReadResourceResult, ErrorData> {
+    ) -> Result<ReadResourceResponse, ErrorData> {
         Err(ErrorData::new(
             ErrorCode::METHOD_NOT_FOUND,
             "resources not supported",
@@ -431,6 +441,10 @@ impl CompletionProvider for Unset {
 }
 
 impl LoggingProvider for Unset {
+    #[expect(
+        deprecated,
+        reason = "rmcp 3.x deprecates logging (SEP-2577); legacy protocol versions still dispatch logging/setLevel"
+    )]
     async fn set_level(
         &self,
         _request: SetLevelRequestParams,

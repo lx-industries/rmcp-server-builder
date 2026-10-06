@@ -40,7 +40,7 @@ Add to your `Cargo.toml`:
 ```toml
 [dependencies]
 rmcp-server-builder = "0.1"
-rmcp = { version = "0.12", features = ["server"] }
+rmcp = { version = "3.5.1", features = ["server"] }
 ```
 
 ## Development
