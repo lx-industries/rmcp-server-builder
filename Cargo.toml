@@ -12,4 +12,5 @@ categories = ["development-tools"]
 rmcp = { version = "3.5.1", features = ["server"] }
 
 [dev-dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+rmcp = { version = "3.5.1", features = ["client", "server"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-util"] }
