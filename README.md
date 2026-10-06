@@ -39,9 +39,32 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-rmcp-server-builder = "0.1"
+rmcp-server-builder = "0.2"
 rmcp = { version = "3.5.1", features = ["server"] }
 ```
+
+## Upgrading from 0.1
+
+0.2 builds on `rmcp` 3.x; 0.1 builds on `rmcp` 1.x. Four signatures change:
+
+| Item | 0.1 | 0.2 |
+|---|---|---|
+| `ToolsProvider::call_tool` | `Result<CallToolResult, ErrorData>` | `Result<CallToolResponse, ErrorData>` |
+| `PromptsProvider::get_prompt` | `Result<GetPromptResult, ErrorData>` | `Result<GetPromptResponse, ErrorData>` |
+| `ResourcesProvider::read_resource` | `Result<ReadResourceResult, ErrorData>` | `Result<ReadResourceResponse, ErrorData>` |
+| `ServerInfoProvider::get_info` | `ServerInfo` | `ServerConfig` |
+
+Convert an ordinary result with `.into()`:
+
+```rust
+Ok(CallToolResult::success(content).into())
+```
+
+`ServerInfo` is a deprecated alias of `ServerConfig` in `rmcp` 3.x; rename it to drop the
+warning.
+
+Migrate the downstream `ServerHandler` implementations and every boundary that passes `rmcp`
+types to `rmcp` 3.x in the same change: the `rmcp` 1.x and 3.x types do not unify.
 
 ## Development
 
