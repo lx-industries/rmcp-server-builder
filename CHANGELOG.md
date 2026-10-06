@@ -1,3 +1,24 @@
+## [0.2.0](https://gitlab.com/lx-industries/rmcp-server-builder/compare/v0.1.19...v0.2.0) (2026-10-06)
+
+
+### ⚠ BREAKING CHANGES
+
+* ToolsProvider::call_tool returns CallToolResponse,
+PromptsProvider::get_prompt returns GetPromptResponse, and
+ResourcesProvider::read_resource returns ReadResourceResponse. Migration: change the
+return type and convert the result with `.into()`, for example
+`Ok(CallToolResult::success(content).into())`. The crate requires rmcp 3.x.
+
+### Features
+
+* build on rmcp 3.5.1 ([ff4954b](https://gitlab.com/lx-industries/rmcp-server-builder/commit/ff4954baa950034cc436aa20329b32d33a3f0998)), closes [#6](https://gitlab.com/lx-industries/rmcp-server-builder/issues/6)
+
+
+### Bug Fixes
+
+* **server:** answer a task from a tools provider with an error ([ac52276](https://gitlab.com/lx-industries/rmcp-server-builder/commit/ac522764f03cac1afc598b92bbe3cc23b0ce2b47)), closes [#5](https://gitlab.com/lx-industries/rmcp-server-builder/issues/5) [#6](https://gitlab.com/lx-industries/rmcp-server-builder/issues/6)
+* **server:** derive each capability from its provider ([b2f9392](https://gitlab.com/lx-industries/rmcp-server-builder/commit/b2f9392a4507c90310a58f4e5db97492f7e093ef)), closes [#6](https://gitlab.com/lx-industries/rmcp-server-builder/issues/6)
+
 ## [0.1.19](https://gitlab.com/lx-industries/rmcp-server-builder/compare/v0.1.18...v0.1.19) (2026-09-21)
 
 
