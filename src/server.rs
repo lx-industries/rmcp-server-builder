@@ -5,11 +5,10 @@ use rmcp::{
     model::{
         CallToolRequestParams, CallToolResponse, CancelledNotificationParam, CompleteRequestParams,
         CompleteResult, ErrorCode, ErrorData, GetPromptRequestParams, GetPromptResponse,
-        InitializeRequestParams, InitializeResult, JsonObject, ListPromptsResult,
-        ListResourceTemplatesResult, ListResourcesResult, ListToolsResult, PaginatedRequestParams,
-        ProgressNotificationParam, PromptsCapability, ReadResourceRequestParams,
-        ReadResourceResponse, ResourcesCapability, ServerCapabilities, ServerConfig,
-        SubscribeRequestParams, ToolsCapability, UnsubscribeRequestParams,
+        InitializeRequestParams, InitializeResult, ListPromptsResult, ListResourceTemplatesResult,
+        ListResourcesResult, ListToolsResult, PaginatedRequestParams, ProgressNotificationParam,
+        ReadResourceRequestParams, ReadResourceResponse, ServerCapabilities, ServerConfig,
+        SubscribeRequestParams, UnsubscribeRequestParams,
     },
     service::{NotificationContext, RequestContext, RoleServer},
 };
@@ -56,22 +55,36 @@ impl<T, P, R, C, L, I> Server<T, P, R, C, L, I>
 where
     I: ServerInfoProvider,
 {
-    /// Get the combined capabilities based on which providers are set.
+    /// Get the capabilities this server advertises.
+    ///
+    /// Each provider-backed capability (tools, prompts, resources, completions, logging) is
+    /// present if and only if its provider is set. For a set provider, the capability keeps the
+    /// subflags the info provider configures (`listChanged`, `subscribe`); when the info provider
+    /// configures none, the capability is the default. Every other field comes from the info
+    /// provider unchanged.
     fn combined_capabilities(&self) -> ServerCapabilities {
         let mut caps = self.info.capabilities();
 
-        if self.tools.is_some() {
-            caps.tools = Some(ToolsCapability::default());
-        }
-        if self.prompts.is_some() {
-            caps.prompts = Some(PromptsCapability::default());
-        }
-        if self.resources.is_some() {
-            caps.resources = Some(ResourcesCapability::default());
-        }
-        if self.logging.is_some() {
-            caps.logging = Some(JsonObject::default());
-        }
+        caps.tools = self
+            .tools
+            .as_ref()
+            .map(|_| caps.tools.take().unwrap_or_default());
+        caps.prompts = self
+            .prompts
+            .as_ref()
+            .map(|_| caps.prompts.take().unwrap_or_default());
+        caps.resources = self
+            .resources
+            .as_ref()
+            .map(|_| caps.resources.take().unwrap_or_default());
+        caps.completions = self
+            .completion
+            .as_ref()
+            .map(|_| caps.completions.take().unwrap_or_default());
+        caps.logging = self
+            .logging
+            .as_ref()
+            .map(|_| caps.logging.take().unwrap_or_default());
 
         caps
     }
@@ -455,5 +468,91 @@ impl LoggingProvider for Unset {
             "logging not supported",
             None,
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rmcp::model::{
+        Implementation, JsonObject, PromptsCapability, ResourcesCapability, ServerCapabilities,
+        ToolsCapability,
+    };
+
+    use super::{ServerHandler, Unset};
+    use crate::{ServerBuilder, SimpleInfo};
+
+    /// Capabilities that advertise every provider-backed capability, with every subflag set.
+    fn advertised_capabilities() -> ServerCapabilities {
+        let mut capabilities = ServerCapabilities::default();
+        let mut tools = ToolsCapability::default();
+        tools.list_changed = Some(true);
+        capabilities.tools = Some(tools);
+        let mut prompts = PromptsCapability::default();
+        prompts.list_changed = Some(true);
+        capabilities.prompts = Some(prompts);
+        let mut resources = ResourcesCapability::default();
+        resources.subscribe = Some(true);
+        resources.list_changed = Some(true);
+        capabilities.resources = Some(resources);
+        let mut flag = JsonObject::new();
+        flag.insert("configured".into(), true.into());
+        capabilities.logging = Some(flag.clone());
+        capabilities.completions = Some(flag);
+        capabilities
+    }
+
+    fn info(capabilities: ServerCapabilities) -> SimpleInfo {
+        SimpleInfo::new(Implementation::new("test", "1.0.0")).with_capabilities(capabilities)
+    }
+
+    #[test]
+    fn each_installed_provider_advertises_its_capability() {
+        let server = ServerBuilder::new()
+            .info(Implementation::new("test", "1.0.0"))
+            .tools(Unset)
+            .prompts(Unset)
+            .resources(Unset)
+            .completion(Unset)
+            .logging(Unset)
+            .build();
+
+        let capabilities = server.get_info().capabilities;
+
+        assert!(capabilities.tools.is_some());
+        assert!(capabilities.prompts.is_some());
+        assert!(capabilities.resources.is_some());
+        assert!(capabilities.completions.is_some());
+        assert!(capabilities.logging.is_some());
+    }
+
+    #[test]
+    fn an_absent_provider_clears_the_capability_the_info_provider_advertises() {
+        let server = ServerBuilder::new()
+            .info(info(advertised_capabilities()))
+            .build();
+
+        let capabilities = server.get_info().capabilities;
+
+        assert!(capabilities.tools.is_none());
+        assert!(capabilities.prompts.is_none());
+        assert!(capabilities.resources.is_none());
+        assert!(capabilities.completions.is_none());
+        assert!(capabilities.logging.is_none());
+    }
+
+    #[test]
+    fn an_installed_provider_keeps_the_subflags_the_info_provider_configures() {
+        let server = ServerBuilder::new()
+            .info(info(advertised_capabilities()))
+            .tools(Unset)
+            .prompts(Unset)
+            .resources(Unset)
+            .completion(Unset)
+            .logging(Unset)
+            .build();
+
+        let capabilities = server.get_info().capabilities;
+
+        assert_eq!(capabilities, advertised_capabilities());
     }
 }
