@@ -4,13 +4,13 @@ use rmcp::{
     ServiceExt,
     model::{
         CallToolRequestParams, CallToolResponse, CallToolResult, ClientCapabilities, ClientConfig,
-        ContentBlock, ErrorData, GetPromptRequestParams, GetPromptResponse, GetPromptResult,
-        Implementation, ListPromptsResult, ListResourceTemplatesResult, ListResourcesResult,
-        ListToolsResult, PaginatedRequestParams, ProtocolVersion, ReadResourceRequestParams,
-        ReadResourceResponse, ReadResourceResult, ResourceContents, SubscribeRequestParams,
-        UnsubscribeRequestParams,
+        ContentBlock, CreateTaskResult, ErrorCode, ErrorData, GetPromptRequestParams,
+        GetPromptResponse, GetPromptResult, Implementation, ListPromptsResult,
+        ListResourceTemplatesResult, ListResourcesResult, ListToolsResult, PaginatedRequestParams,
+        ProtocolVersion, ReadResourceRequestParams, ReadResourceResponse, ReadResourceResult,
+        ResourceContents, SubscribeRequestParams, Task, TaskStatus, UnsubscribeRequestParams,
     },
-    service::{RequestContext, RoleServer},
+    service::{RequestContext, RoleServer, ServiceError},
 };
 use rmcp_server_builder::{PromptsProvider, ResourcesProvider, ServerBuilder, ToolsProvider};
 
@@ -36,6 +36,33 @@ impl ToolsProvider for Tools {
         _context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
         Ok(CallToolResult::success(vec![ContentBlock::text(TOOL_TEXT)]).into())
+    }
+}
+
+/// A tools provider whose `call_tool` materializes a task (SEP-2663).
+struct TaskTools;
+
+impl ToolsProvider for TaskTools {
+    async fn list_tools(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListToolsResult, ErrorData> {
+        Ok(ListToolsResult::default())
+    }
+
+    async fn call_tool(
+        &self,
+        _request: CallToolRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResponse, ErrorData> {
+        let task = Task::new(
+            "task-1",
+            TaskStatus::Working,
+            "2026-10-06T00:00:00Z",
+            "2026-10-06T00:00:00Z",
+        );
+        Ok(CreateTaskResult::new(task).into())
     }
 }
 
@@ -193,6 +220,43 @@ async fn initialize_answers_with_the_requested_supported_version() {
     );
     assert_eq!(peer_info.instructions.as_deref(), Some("test instructions"));
     assert!(peer_info.capabilities.tools.is_some());
+
+    client.cancel().await.expect("cancel client");
+    server_task.await.expect("server task");
+}
+
+#[tokio::test]
+async fn a_task_from_a_tools_provider_is_answered_with_an_internal_error() {
+    let (server_transport, client_transport) = tokio::io::duplex(4096);
+    let server = ServerBuilder::new()
+        .info(Implementation::new("test-server", "1.0.0"))
+        .tools(TaskTools)
+        .build();
+    let server_task = tokio::spawn(async move {
+        let running = server.serve(server_transport).await.expect("serve server");
+        running.waiting().await.expect("server stops");
+    });
+
+    let mut configuration = client_configuration(ProtocolVersion::LATEST_WITH_INITIALIZE);
+    configuration.capabilities = ClientCapabilities::builder().enable_tasks().build();
+    let client = configuration
+        .serve(client_transport)
+        .await
+        .expect("initialize client");
+
+    let response = client
+        .call_tool_once(CallToolRequestParams::new("any"))
+        .await;
+
+    let Err(ServiceError::McpError(error)) = response else {
+        panic!("expected an MCP error, got {response:?}");
+    };
+    assert_eq!(error.code, ErrorCode::INTERNAL_ERROR);
+    assert!(
+        error.message.contains("tasks/"),
+        "message names tasks/*: {}",
+        error.message
+    );
 
     client.cancel().await.expect("cancel client");
     server_task.await.expect("server task");

@@ -34,6 +34,9 @@ pub trait ToolsProvider: Send + Sync + 'static {
     ) -> impl Future<Output = Result<ListToolsResult, ErrorData>> + Send;
 
     /// Execute a tool.
+    ///
+    /// The composed [`Server`](crate::Server) answers a [`CallToolResponse::Task`] with an
+    /// internal error, because it does not serve `tasks/*` yet.
     fn call_tool(
         &self,
         request: CallToolRequestParams,

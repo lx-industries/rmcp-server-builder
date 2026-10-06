@@ -24,6 +24,13 @@ use crate::providers::{
     ToolsProvider,
 };
 
+/// Error message for a tools provider that answers `tools/call` with a task.
+///
+/// The composed server keeps rmcp's `tasks/get`, `tasks/update` and `tasks/cancel` defaults,
+/// which answer -32601. A client that received the task handle could never fetch the result.
+const TASK_NOT_SERVED_MESSAGE: &str = "the tools provider returned a task, but the composed \
+     server does not serve tasks/* yet (rmcp-server-builder#5)";
+
 /// Marker for an unset provider.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Unset;
@@ -154,7 +161,12 @@ where
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
         match &self.tools {
-            Some(provider) => provider.call_tool(request, context).await,
+            Some(provider) => match provider.call_tool(request, context).await {
+                Ok(CallToolResponse::Task(_)) => {
+                    Err(ErrorData::internal_error(TASK_NOT_SERVED_MESSAGE, None))
+                }
+                response => response,
+            },
             None => Err(ErrorData::new(
                 ErrorCode::METHOD_NOT_FOUND,
                 "tools not supported",
