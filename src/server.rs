@@ -3,14 +3,13 @@
 use rmcp::{
     handler::server::ServerHandler,
     model::{
-        CallToolRequestParams, CallToolResponse, CancelledNotificationParam, CompleteRequestParams,
-        CompleteResult, ErrorCode, ErrorData, GetPromptRequestParams, GetPromptResponse,
-        InitializeRequestParams, InitializeResult, ListPromptsResult, ListResourceTemplatesResult,
-        ListResourcesResult, ListToolsResult, PaginatedRequestParams, ProgressNotificationParam,
+        CallToolRequestParams, CallToolResponse, CompleteRequestParams, CompleteResult, ErrorCode,
+        ErrorData, GetPromptRequestParams, GetPromptResponse, ListPromptsResult,
+        ListResourceTemplatesResult, ListResourcesResult, ListToolsResult, PaginatedRequestParams,
         ReadResourceRequestParams, ReadResourceResponse, ServerCapabilities, ServerConfig,
         SubscribeRequestParams, UnsubscribeRequestParams,
     },
-    service::{NotificationContext, RequestContext, RoleServer},
+    service::{RequestContext, RoleServer},
 };
 
 #[expect(
@@ -119,25 +118,6 @@ where
             info = info.with_instructions(instructions);
         }
         info
-    }
-
-    async fn initialize(
-        &self,
-        _request: InitializeRequestParams,
-        _context: RequestContext<RoleServer>,
-    ) -> Result<InitializeResult, ErrorData> {
-        let base = self.info.get_info();
-        let mut result = InitializeResult::new(self.combined_capabilities())
-            .with_protocol_version(base.protocol_version)
-            .with_server_info(base.server_info);
-        if let Some(instructions) = self.instructions.clone().or(base.instructions) {
-            result = result.with_instructions(instructions);
-        }
-        Ok(result)
-    }
-
-    async fn ping(&self, _context: RequestContext<RoleServer>) -> Result<(), ErrorData> {
-        Ok(())
     }
 
     async fn list_tools(
@@ -313,24 +293,6 @@ where
             )),
         }
     }
-
-    async fn on_cancelled(
-        &self,
-        _notification: CancelledNotificationParam,
-        _context: NotificationContext<RoleServer>,
-    ) {
-    }
-
-    async fn on_progress(
-        &self,
-        _notification: ProgressNotificationParam,
-        _context: NotificationContext<RoleServer>,
-    ) {
-    }
-
-    async fn on_initialized(&self, _context: NotificationContext<RoleServer>) {}
-
-    async fn on_roots_list_changed(&self, _context: NotificationContext<RoleServer>) {}
 }
 
 // =============================================================================
