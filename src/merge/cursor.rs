@@ -68,9 +68,92 @@ pub(crate) fn decode(cursor: &str) -> Result<(usize, Option<String>), rmcp::mode
     Ok((provider_index, Some(inner.to_string())))
 }
 
+/// Page cap for a full drain of one composed provider's list, or one completion
+/// source's scan, before it is refused as non-terminating.
+///
+/// A provider that never answers `next_cursor: None` would otherwise drain forever;
+/// this cap turns that into an error after a generous but finite number of pages.
+pub(crate) const MAX_DRAIN_PAGES: usize = 10_000;
+
+/// Guards one step of a full drain against a non-terminating provider.
+///
+/// Call this once per page, after reading that page's `next_cursor`, with the inner
+/// cursor the page just answered (the one the *next* call would present) and the set
+/// of inner cursors already seen in this drain. `provider_index` and `page_count` are
+/// folded into the error so it names where the drain stalled.
+///
+/// # Errors
+///
+/// Returns [`rmcp::model::ErrorData::internal_error`] naming `provider_index` and
+/// `next_inner_cursor` when that cursor was already seen earlier in this drain.
+/// Returns the same kind of error naming `provider_index` and [`MAX_DRAIN_PAGES`]
+/// when `page_count` reaches the cap.
+pub(crate) fn guard_drain_progress(
+    provider_index: usize,
+    page_count: usize,
+    next_inner_cursor: &str,
+    seen_inner_cursors: &mut std::collections::HashSet<String>,
+) -> Result<(), rmcp::model::ErrorData> {
+    if !seen_inner_cursors.insert(next_inner_cursor.to_string()) {
+        return Err(rmcp::model::ErrorData::internal_error(
+            format!(
+                "provider {provider_index}: drain cursor {next_inner_cursor:?} repeats \
+                 a cursor already seen in this drain"
+            ),
+            None,
+        ));
+    }
+    if page_count + 1 >= MAX_DRAIN_PAGES {
+        return Err(rmcp::model::ErrorData::internal_error(
+            format!(
+                "provider {provider_index}: drain did not terminate within \
+                 {MAX_DRAIN_PAGES} pages"
+            ),
+            None,
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use super::*;
+
+    #[test]
+    fn guard_drain_progress_rejects_a_repeated_inner_cursor() {
+        let mut seen = HashSet::new();
+        guard_drain_progress(0, 0, "a", &mut seen).expect("first sighting of \"a\" passes");
+
+        let error = guard_drain_progress(0, 1, "a", &mut seen)
+            .expect_err("a repeated inner cursor ends the drain");
+
+        assert_eq!(error.code, rmcp::model::ErrorCode::INTERNAL_ERROR);
+        assert!(error.message.contains("provider 0"), "{error:?}");
+        assert!(error.message.contains("\"a\""), "{error:?}");
+    }
+
+    #[test]
+    fn guard_drain_progress_rejects_reaching_the_page_cap() {
+        let mut seen = HashSet::new();
+        let error = guard_drain_progress(2, MAX_DRAIN_PAGES - 1, "fresh", &mut seen)
+            .expect_err("reaching the page cap ends the drain");
+
+        assert_eq!(error.code, rmcp::model::ErrorCode::INTERNAL_ERROR);
+        assert!(error.message.contains("provider 2"), "{error:?}");
+        assert!(
+            error.message.contains(&MAX_DRAIN_PAGES.to_string()),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn guard_drain_progress_accepts_distinct_cursors_under_the_cap() {
+        let mut seen = HashSet::new();
+        guard_drain_progress(0, 0, "a", &mut seen).expect("distinct cursor under the cap passes");
+        guard_drain_progress(0, 1, "b", &mut seen).expect("distinct cursor under the cap passes");
+    }
 
     #[test]
     fn round_trips_a_provider_index_with_an_inner_cursor() {
