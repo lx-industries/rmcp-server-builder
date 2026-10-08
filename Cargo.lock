@@ -419,7 +419,7 @@ dependencies = [
 
 [[package]]
 name = "rmcp-server-builder"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "rmcp",
  "tokio",

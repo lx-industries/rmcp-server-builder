@@ -1,3 +1,23 @@
+## [0.3.0](https://gitlab.com/lx-industries/rmcp-server-builder/compare/v0.2.0...v0.3.0) (2026-10-08)
+
+
+### Features
+
+* **merge:** add MergedCompletionProvider routing by reference ([27e1f2e](https://gitlab.com/lx-industries/rmcp-server-builder/commit/27e1f2e53327aee5f10b1d2c661c6e298ab757fa))
+* **merge:** add MergedLoggingProvider fan-out ([e4fcc29](https://gitlab.com/lx-industries/rmcp-server-builder/commit/e4fcc29325c836399013315a5b417113e8d744cd))
+* **merge:** add MergedPromptsProvider list and call routing ([2a6b8d1](https://gitlab.com/lx-industries/rmcp-server-builder/commit/2a6b8d14d546262d86b51e1d6a2e9a7ffe55bb22))
+* **merge:** add MergedResourcesProvider listing ([0374f5a](https://gitlab.com/lx-industries/rmcp-server-builder/commit/0374f5a2ca5fe0e71b6382bf44d25fa91484abda))
+* **merge:** add MergedToolsProvider list and call routing ([15831f1](https://gitlab.com/lx-industries/rmcp-server-builder/commit/15831f17c725881b79005fad56499c91a20a18f2))
+* **merge:** add the cursor codec shared by every list-type merge ([515a639](https://gitlab.com/lx-industries/rmcp-server-builder/commit/515a63953ff020a6ed3ba21acbbdbe4eb059a590))
+* **merge:** route MergedResourcesProvider by exact URI, template, then scheme ([f9000a0](https://gitlab.com/lx-industries/rmcp-server-builder/commit/f9000a01934d286bf0be0e3e6040f7b7d4a31c81))
+* **merge:** route tasks/* to the provider that created the task ([58a4755](https://gitlab.com/lx-industries/rmcp-server-builder/commit/58a4755350ed5b91bbd9cb7846398bdcad3de71d))
+* **merge:** wire merging providers into lib.rs and propagate listChanged ([e956d22](https://gitlab.com/lx-industries/rmcp-server-builder/commit/e956d22238f85f97bac6eb0a5d696fdde186dee0))
+
+
+### Bug Fixes
+
+* **server:** forward a CallToolResponse::Task when the server advertises tasks ([d5db6c0](https://gitlab.com/lx-industries/rmcp-server-builder/commit/d5db6c0be65f019de400648581fed96868009666))
+
 ## [0.2.0](https://gitlab.com/lx-industries/rmcp-server-builder/compare/v0.1.19...v0.2.0) (2026-10-06)
 
 
