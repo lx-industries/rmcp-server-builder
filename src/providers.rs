@@ -36,8 +36,14 @@ pub trait ToolsProvider: Send + Sync + 'static {
 
     /// Execute a tool.
     ///
-    /// The composed [`Server`](crate::Server) answers a [`CallToolResponse::Task`] with an
-    /// internal error, because it does not serve `tasks/*` yet.
+    /// The composed [`Server`](crate::Server) serves `tasks/*` for a [`CallToolResponse::Task`]
+    /// by delegating [`ToolsProvider::get_task`], [`ToolsProvider::update_task`] and
+    /// [`ToolsProvider::cancel_task`] to this provider, but only when the server's combined
+    /// capabilities advertise the `io.modelcontextprotocol/tasks` extension
+    /// (`ServerCapabilities::supports_tasks`). Otherwise `Server::call_tool` answers
+    /// `ErrorData::internal_error` instead of forwarding the task: a client with no `tasks/*`
+    /// support could never fetch the result. Enable the extension with
+    /// `ServerCapabilities::builder().enable_tasks()` on the info provider.
     fn call_tool(
         &self,
         request: CallToolRequestParams,

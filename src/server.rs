@@ -24,13 +24,6 @@ use crate::providers::{
     ToolsProvider,
 };
 
-/// Error message for a tools provider that answers `tools/call` with a task.
-///
-/// The composed server keeps rmcp's `tasks/get`, `tasks/update` and `tasks/cancel` defaults,
-/// which answer -32601. A client that received the task handle could never fetch the result.
-const TASK_NOT_SERVED_MESSAGE: &str = "the tools provider returned a task, but the composed \
-     server does not serve tasks/* yet (rmcp-server-builder#5)";
-
 /// Marker for an unset provider.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Unset;
@@ -136,6 +129,16 @@ where
         }
     }
 
+    /// Executes a tool through the composed tools provider.
+    ///
+    /// Forwards a [`CallToolResponse::Task`] as-is only when the server's combined
+    /// capabilities advertise the `io.modelcontextprotocol/tasks` extension
+    /// (`supports_tasks()`): only then does the composed [`ServerHandler`] serve
+    /// `tasks/get`, `tasks/update` and `tasks/cancel` for it (see this impl's
+    /// `get_task`/`update_task`/`cancel_task`, which delegate to `self.tools`).
+    /// Otherwise answers `ErrorData::internal_error`, naming that the tools provider
+    /// returned a task while the server does not advertise the tasks extension, and
+    /// how to enable it.
     async fn call_tool(
         &self,
         request: CallToolRequestParams,
@@ -143,8 +146,19 @@ where
     ) -> Result<CallToolResponse, ErrorData> {
         match &self.tools {
             Some(provider) => match provider.call_tool(request, context).await {
-                Ok(CallToolResponse::Task(_)) => {
-                    Err(ErrorData::internal_error(TASK_NOT_SERVED_MESSAGE, None))
+                Ok(CallToolResponse::Task(created))
+                    if !self.combined_capabilities().supports_tasks() =>
+                {
+                    Err(ErrorData::internal_error(
+                        format!(
+                            "the tools provider returned a task (id {task_id:?}), but the \
+                             composed server does not advertise the tasks extension; \
+                             enable it with \
+                             ServerCapabilities::builder().enable_tasks() on the info provider",
+                            task_id = created.task.task_id
+                        ),
+                        None,
+                    ))
                 }
                 response => response,
             },

@@ -5,15 +5,18 @@ use rmcp::{
     model::{
         CallToolRequestParams, CallToolResponse, CallToolResult, ClientCapabilities, ClientConfig,
         ContentBlock, CreateTaskResult, ErrorCode, ErrorData, GetPromptRequestParams,
-        GetPromptResponse, GetPromptResult, Implementation, InputRequiredResult, ListPromptsResult,
-        ListResourceTemplatesResult, ListResourcesResult, ListToolsResult, PaginatedRequestParams,
-        ProtocolVersion, ReadResourceRequestParams, ReadResourceResponse, ReadResourceResult,
-        ResourceContents, ServerConfig, SubscribeRequestParams, Task, TaskStatus,
-        UnsubscribeRequestParams,
+        GetPromptResponse, GetPromptResult, GetTaskParams, Implementation, InputRequiredResult,
+        ListPromptsResult, ListResourceTemplatesResult, ListResourcesResult, ListToolsResult,
+        PaginatedRequestParams, ProtocolVersion, ReadResourceRequestParams, ReadResourceResponse,
+        ReadResourceResult, ResourceContents, ServerConfig, SubscribeRequestParams, Task,
+        TaskStatus, UnsubscribeRequestParams,
     },
     service::{RequestContext, RoleServer, ServiceError},
 };
-use rmcp_server_builder::{PromptsProvider, ResourcesProvider, ServerBuilder, ToolsProvider};
+use rmcp_server_builder::{
+    PromptsProvider, ResourcesProvider, ServerBuilder, ServerCapabilities, SimpleInfo,
+    ToolsProvider,
+};
 
 const TOOL_TEXT: &str = "tool ran";
 const PROMPT_DESCRIPTION: &str = "a prompt";
@@ -248,12 +251,16 @@ async fn initialize_answers_with_the_requested_supported_version() {
 }
 
 #[tokio::test]
-async fn a_task_from_a_tools_provider_is_answered_with_an_internal_error() {
+async fn a_task_from_a_tools_provider_that_does_not_serve_tasks_answers_method_not_found_on_get_task()
+ {
     let (server_transport, client_transport) = tokio::io::duplex(4096);
-    let server = ServerBuilder::new()
-        .info(Implementation::new("test-server", "1.0.0"))
-        .tools(TaskTools)
-        .build();
+    // `tasks/get` is gated on the server advertising the tasks extension
+    // (SEP-2663, `rmcp`'s `validate_tasks_capability`): without it, `rmcp` answers
+    // `METHOD_NOT_FOUND` before ever reaching `Server::get_task`. Enabling it here
+    // lets the request reach `TaskTools`'s own (default) `get_task` body.
+    let info = SimpleInfo::new(Implementation::new("test-server", "1.0.0"))
+        .with_capabilities(ServerCapabilities::builder().enable_tasks().build());
+    let server = ServerBuilder::new().info(info).tools(TaskTools).build();
     let server_task = tokio::spawn(async move {
         let running = server.serve(server_transport).await.expect("serve server");
         running.waiting().await.expect("server stops");
@@ -266,19 +273,26 @@ async fn a_task_from_a_tools_provider_is_answered_with_an_internal_error() {
         .await
         .expect("initialize client");
 
-    let response = client
+    // `TaskTools::call_tool` creates a task. The composed `Server` now routes
+    // `CallToolResponse::Task` through unchanged: the call succeeds.
+    let CallToolResponse::Task(create_task_result) = client
         .call_tool_once(CallToolRequestParams::new("any"))
+        .await
+        .expect("call_tool succeeds and returns a task")
+    else {
+        panic!("expected a CallToolResponse::Task");
+    };
+
+    // `TaskTools` never overrides `get_task`: `ToolsProvider`'s default body answers
+    // `METHOD_NOT_FOUND`, and `Server::get_task` passes that through unchanged.
+    let response = client
+        .get_task(GetTaskParams::new(create_task_result.task.task_id))
         .await;
 
     let Err(ServiceError::McpError(error)) = response else {
         panic!("expected an MCP error, got {response:?}");
     };
-    assert_eq!(error.code, ErrorCode::INTERNAL_ERROR);
-    assert!(
-        error.message.contains("tasks/"),
-        "message names tasks/*: {}",
-        error.message
-    );
+    assert_eq!(error.code, ErrorCode::METHOD_NOT_FOUND);
 
     client.cancel().await.expect("cancel client");
     server_task.await.expect("server task");

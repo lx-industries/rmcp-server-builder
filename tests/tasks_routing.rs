@@ -1,44 +1,27 @@
 //! End-to-end test: a real `rmcp` client's `tools/call` for a task-creating tool,
 //! composed inside a `MergedToolsProvider` alongside a plain, non-task-creating stub,
-//! surfaces the same `tasks/*`-naming internal error that
-//! `tests/composed_server.rs::a_task_from_a_tools_provider_is_answered_with_an_internal_error`
-//! already asserts for a bare (non-merged) provider.
+//! round-trips through a real `tasks/get` call that reaches the creating provider.
 //!
-//! # Why this file stops short of a real `tasks/get` round trip
-//!
-//! `Server::call_tool` (`src/server.rs`) unconditionally converts any
-//! `CallToolResponse::Task` the composed tools provider answers into
-//! `ErrorData::internal_error(TASK_NOT_SERVED_MESSAGE, ...)`, *before* a real client
-//! ever receives a task id:
-//!
-//! ```ignore
-//! Ok(CallToolResponse::Task(_)) => Err(ErrorData::internal_error(TASK_NOT_SERVED_MESSAGE, None)),
-//! ```
-//!
-//! This holds for every tools provider the composed `Server` wraps, merged or not, and
-//! is unconditional on the client's declared capabilities (rmcp-server-builder#5, a
-//! pre-existing, documented limitation predating this branch's merge-providers work).
-//! `MergedToolsProvider::get_task`/`update_task`/`cancel_task` do route a `tasks/*` call
-//! to the composed provider that created the task (see
-//! `src/merge/tools.rs::tests::routes_tasks_to_the_provider_that_created_them`, which
-//! exercises that routing directly against the trait), but no real client can ever
-//! reach that routing through a `ServerBuilder`-built `Server`: no task is ever
-//! created over the wire to poll with `tasks/get`. This test instead asserts the one
-//! thing that IS observable end-to-end: that `MergedToolsProvider` composition does
-//! not change this pre-existing guard's behavior for a task-creating tool, and that
-//! the plain tool composed alongside it is unaffected.
+//! `Server::call_tool` (`src/server.rs`) passes a `CallToolResponse::Task` through
+//! unchanged, so a real client receives the task id and can poll it with `tasks/get`.
+//! `Server::get_task` delegates to the composed tools provider, and
+//! `MergedToolsProvider::get_task` routes to the specific provider that created the
+//! task (see `src/merge/tools.rs::tests::routes_tasks_to_the_provider_that_created_them`
+//! for the same routing exercised directly against the trait). This test proves that
+//! routing end-to-end, through the wire, with a plain tool composed alongside the
+//! task-creating one to show the response reaches the owning provider and not it.
 
 use rmcp::{
     ServiceExt,
     model::{
         CallToolRequestParams, CallToolResponse, CallToolResult, ClientCapabilities, ClientConfig,
-        ContentBlock, CreateTaskResult, ErrorCode, ErrorData, GetTaskParams, GetTaskResult,
-        Implementation, JsonObject, ListToolsResult, PaginatedRequestParams, RequestId, Task,
+        ContentBlock, CreateTaskResult, ErrorData, GetTaskParams, GetTaskResult, Implementation,
+        JsonObject, ListToolsResult, PaginatedRequestParams, RequestId, ServerCapabilities, Task,
         TaskPayload, TaskStatus, Tool,
     },
-    service::{Peer, RequestContext, RoleServer, ServiceError},
+    service::{Peer, RequestContext, RoleServer},
 };
-use rmcp_server_builder::{MergedToolsProvider, ServerBuilder, ToolsProvider};
+use rmcp_server_builder::{MergedToolsProvider, ServerBuilder, SimpleInfo, ToolsProvider};
 
 /// A distinguishable marker [`TaskTools::get_task`] stamps onto the
 /// [`GetTaskResult`]'s task status message, so a test can assert that the real
@@ -128,10 +111,16 @@ impl ToolsProvider for PlainTool {
 }
 
 #[tokio::test]
-async fn a_task_creating_tool_composed_with_a_plain_tool_still_answers_an_internal_error() {
+async fn a_task_creating_tool_composed_with_a_plain_tool_routes_tasks_get_to_the_creating_provider()
+{
     let (server_transport, client_transport) = tokio::io::duplex(4096);
+    // `tasks/get` is gated on the server advertising the tasks extension
+    // (SEP-2663, `rmcp`'s `validate_tasks_capability`): without it, `rmcp` answers
+    // `METHOD_NOT_FOUND` before ever reaching `Server::get_task`.
+    let info = SimpleInfo::new(Implementation::new("test-server", "1.0.0"))
+        .with_capabilities(ServerCapabilities::builder().enable_tasks().build());
     let server = ServerBuilder::new()
-        .info(Implementation::new("test-server", "1.0.0"))
+        .info(info)
         .tools(
             MergedToolsProvider::new()
                 .with_provider(PlainTool)
@@ -161,22 +150,63 @@ async fn a_task_creating_tool_composed_with_a_plain_tool_still_answers_an_intern
     let text = plain_result.content[0].as_text().expect("text content");
     assert_eq!(text.text, "ran plain");
 
-    // `Server::call_tool` (src/server.rs) unconditionally converts a
-    // `CallToolResponse::Task` to an internal error naming `tasks/*`, for any composed
-    // tools provider (see this file's module doc comment): composing the task-creating
-    // tool inside a `MergedToolsProvider` does not change that.
-    let response = client
+    // `Server::call_tool` passes a `CallToolResponse::Task` through unchanged: the real
+    // client receives the task id `TaskTools::call_tool` minted.
+    let CallToolResponse::Task(create_task_result) = client
         .call_tool_once(CallToolRequestParams::new("make-task"))
-        .await;
-    let Err(ServiceError::McpError(error)) = response else {
-        panic!("expected an MCP error, got {response:?}");
+        .await
+        .expect("call_tool succeeds and returns a task")
+    else {
+        panic!("expected a CallToolResponse::Task");
     };
-    assert_eq!(error.code, ErrorCode::INTERNAL_ERROR);
-    assert!(
-        error.message.contains("tasks/"),
-        "message names tasks/*: {}",
-        error.message
+
+    // `Server::get_task` delegates to the composed `MergedToolsProvider`, which routes
+    // `tasks/get` to `TaskTools`, the specific provider that created the task, not to
+    // `PlainTool` composed alongside it. `STATUS_MESSAGE` proves which provider answered.
+    let task_result = client
+        .get_task(GetTaskParams::new(create_task_result.task.task_id))
+        .await
+        .expect("tasks/get reaches the owning provider");
+    assert_eq!(
+        task_result.task.task.status_message.as_deref(),
+        Some(STATUS_MESSAGE),
+        "tasks/get must reach TaskTools's own state, not PlainTool's"
     );
+
+    client.cancel().await.expect("cancel client");
+    server_task.await.expect("server task");
+}
+
+#[tokio::test]
+async fn tools_call_answers_an_error_for_a_task_when_tasks_are_not_advertised() {
+    // No `enable_tasks()` on either side: the composed server's combined capabilities
+    // do not advertise SEP-2663, so `Server::call_tool` (`src/server.rs`) must refuse
+    // `TaskTools::call_tool`'s `CallToolResponse::Task` instead of forwarding it; a
+    // client with no `tasks/*` support could never fetch the result otherwise.
+    let (server_transport, client_transport) = tokio::io::duplex(4096);
+    let server = ServerBuilder::new()
+        .info(Implementation::new("test-server", "1.0.0"))
+        .tools(MergedToolsProvider::new().with_provider(TaskTools))
+        .build();
+    let server_task = tokio::spawn(async move {
+        let running = server.serve(server_transport).await.expect("serve server");
+        running.waiting().await.expect("server stops");
+    });
+
+    let configuration = ClientConfig::new(
+        ClientCapabilities::default(),
+        Implementation::new("test-client", "1.0.0"),
+    );
+    let client = configuration
+        .serve(client_transport)
+        .await
+        .expect("initialize client");
+
+    let error = client
+        .call_tool_once(CallToolRequestParams::new("make-task"))
+        .await
+        .expect_err("a task is refused when the server does not advertise tasks");
+    assert!(error.to_string().contains("tasks"), "{error}");
 
     client.cancel().await.expect("cancel client");
     server_task.await.expect("server task");
