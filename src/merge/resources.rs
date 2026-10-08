@@ -31,7 +31,7 @@ use rmcp::{
 
 use crate::providers::ResourcesProvider;
 
-use super::cursor;
+use super::listing;
 
 /// Object-safe adapter over [`ResourcesProvider`], boxing its futures.
 ///
@@ -130,22 +130,6 @@ impl<T: ResourcesProvider> DynResourcesProvider for T {
     ) -> Pin<Box<dyn Future<Output = Result<(), ErrorData>> + Send + 'provider>> {
         Box::pin(ResourcesProvider::unsubscribe(self, request, context))
     }
-}
-
-/// Builds the duplicate-resource-URI error [`MergedResourcesProvider`] answers when
-/// `resource_uri` is listed by both `first_provider_index` and `second_provider_index`.
-fn duplicate_resource_uri_error(
-    resource_uri: &str,
-    first_provider_index: usize,
-    second_provider_index: usize,
-) -> ErrorData {
-    ErrorData::invalid_params(
-        format!(
-            "resource {resource_uri:?} is listed by both provider {first_provider_index} and \
-             provider {second_provider_index}"
-        ),
-        None,
-    )
 }
 
 /// Tests whether `uri` matches the level-1 [RFC 6570] `template`.
@@ -358,117 +342,90 @@ impl MergedResourcesProvider {
         self
     }
 
-    /// Drains every composed provider's full resource list, following each provider's own
-    /// pagination until it answers `next_cursor: None`.
+    /// Drains every composed provider's full resource list, following each provider's
+    /// own pagination until it answers `next_cursor: None`, via the shared
+    /// [`listing::drain`] skeleton.
     ///
-    /// Returns each resource's URI tagged with the 0-indexed provider that listed it, in
+    /// Returns each resource tagged with the 0-indexed provider that listed it, in
     /// provider-then-page order.
-    async fn drain_resource_uris(
+    async fn drain_resources(
         &self,
         context: &RequestContext<RoleServer>,
-    ) -> Result<Vec<(usize, String)>, ErrorData> {
-        let mut uris = Vec::new();
-        for (provider_index, provider) in self.providers.iter().enumerate() {
-            let mut inner_cursor = None;
-            let mut seen_inner_cursors = std::collections::HashSet::new();
-            for page_count in 0.. {
-                let page = provider
+    ) -> Result<Vec<(usize, rmcp::model::Resource)>, ErrorData> {
+        listing::drain(self.providers.len(), |provider_index, inner_cursor| {
+            let provider = &self.providers[provider_index];
+            let context = context.clone();
+            Box::pin(async move {
+                let result = provider
                     .list_resources(
                         Some(PaginatedRequestParams::default().with_cursor(inner_cursor)),
-                        context.clone(),
+                        context,
                     )
                     .await?;
-                uris.extend(
-                    page.resources
-                        .iter()
-                        .map(|resource| (provider_index, resource.uri.clone())),
-                );
-                match page.next_cursor {
-                    Some(next) => {
-                        cursor::guard_drain_progress(
-                            provider_index,
-                            page_count,
-                            &next,
-                            &mut seen_inner_cursors,
-                        )?;
-                        inner_cursor = Some(next);
-                    }
-                    None => break,
-                }
-            }
-        }
-        Ok(uris)
+                Ok(listing::Page {
+                    items: result.resources,
+                    next_cursor: result.next_cursor,
+                })
+            })
+        })
+        .await
     }
 
-    /// Maps every composed provider's resource URIs to the provider that listed them.
+    /// Maps every composed provider's resource URIs to the provider that listed them,
+    /// via the shared [`listing::index_by_provider`] skeleton.
     ///
     /// # Errors
     ///
-    /// Returns [`duplicate_resource_uri_error`] for the first resource URI found listed by
-    /// two different providers (by 0-indexed construction order).
+    /// Returns a duplicate-key error (kind `"resource"`) for the first resource URI
+    /// found listed by two different providers (by 0-indexed construction order).
     async fn index_resource_uris_by_provider(
         &self,
         context: &RequestContext<RoleServer>,
     ) -> Result<HashMap<String, usize>, ErrorData> {
-        let uris = self.drain_resource_uris(context).await?;
-        let mut owner_by_uri = HashMap::new();
-        for (provider_index, resource_uri) in uris {
-            match owner_by_uri.get(&resource_uri) {
-                Some(&owning_index) if owning_index != provider_index => {
-                    return Err(duplicate_resource_uri_error(
-                        &resource_uri,
-                        owning_index,
-                        provider_index,
-                    ));
-                }
-                _ => {
-                    owner_by_uri.insert(resource_uri, provider_index);
-                }
-            }
-        }
-        Ok(owner_by_uri)
+        let drained = self.drain_resources(context).await?;
+        listing::index_by_provider(
+            drained,
+            "resource",
+            |resource| resource.uri.clone(),
+            |uri| uri.clone(),
+        )
     }
 
     /// Drains every composed provider's full resource template list, following each
-    /// provider's own pagination until it answers `next_cursor: None`.
+    /// provider's own pagination until it answers `next_cursor: None`, via the shared
+    /// [`listing::drain`] skeleton.
     ///
     /// Returns each resource template string tagged with the 0-indexed provider that
     /// listed it, in provider-then-page order. Unlike
-    /// [`MergedResourcesProvider::drain_resource_uris`], this runs no duplicate check: two
+    /// [`MergedResourcesProvider::drain_resources`], this runs no duplicate check: two
     /// providers MAY legitimately list the same template string.
     async fn drain_resource_templates(
         &self,
         context: &RequestContext<RoleServer>,
     ) -> Result<Vec<(usize, String)>, ErrorData> {
-        let mut templates = Vec::new();
-        for (provider_index, provider) in self.providers.iter().enumerate() {
-            let mut inner_cursor = None;
-            let mut seen_inner_cursors = std::collections::HashSet::new();
-            for page_count in 0.. {
-                let page = provider
+        let drained = listing::drain(self.providers.len(), |provider_index, inner_cursor| {
+            let provider = &self.providers[provider_index];
+            let context = context.clone();
+            Box::pin(async move {
+                let result = provider
                     .list_resource_templates(
                         Some(PaginatedRequestParams::default().with_cursor(inner_cursor)),
-                        context.clone(),
+                        context,
                     )
                     .await?;
-                templates.extend(page.resource_templates.iter().map(|resource_template| {
-                    (provider_index, resource_template.uri_template.clone())
-                }));
-                match page.next_cursor {
-                    Some(next) => {
-                        cursor::guard_drain_progress(
-                            provider_index,
-                            page_count,
-                            &next,
-                            &mut seen_inner_cursors,
-                        )?;
-                        inner_cursor = Some(next);
-                    }
-                    None => break,
-                }
-            }
-        }
-        Ok(templates)
+                Ok(listing::Page {
+                    items: result.resource_templates,
+                    next_cursor: result.next_cursor,
+                })
+            })
+        })
+        .await?;
+        Ok(drained
+            .into_iter()
+            .map(|(provider_index, resource_template)| {
+                (provider_index, resource_template.uri_template)
+            })
+            .collect())
     }
 
     /// Resolves which composed provider owns `uri`, for `read_resource`, `subscribe`, and
@@ -485,7 +442,8 @@ impl MergedResourcesProvider {
     ///
     /// # Errors
     ///
-    /// Step 1 returns [`duplicate_resource_uri_error`] when `uri` is listed by two
+    /// Step 1 returns a duplicate-key error (kind `"resource"`, see
+    /// [`listing::duplicate_key_error`]) when `uri` is listed by two
     /// providers (expected to have already been rejected by a prior `list_resources`
     /// call; see that function's doc comment on the transient-state case). Step 2
     /// returns [`ambiguous_template_match_error`] when matching templates span two or
@@ -555,48 +513,38 @@ impl ResourcesProvider for MergedResourcesProvider {
         request: Option<PaginatedRequestParams>,
         context: RequestContext<RoleServer>,
     ) -> Result<ListResourcesResult, ErrorData> {
-        let cursor = request.as_ref().and_then(|params| params.cursor.as_deref());
-        if cursor.is_none() && self.providers.is_empty() {
-            // An empty composition has no provider to page into: answer an empty page
-            // directly rather than treating provider index 0 as in range.
-            return Ok(ListResourcesResult::with_all_items(Vec::new()));
-        }
-        let (provider_index, inner_cursor) = match cursor {
-            Some(cursor) => cursor::decode(cursor)?,
-            None => (0, None),
-        };
+        let merge_cursor = request.as_ref().and_then(|params| params.cursor.as_deref());
 
         // Every call re-validates the whole composition: a duplicate introduced by a
         // provider whose own resource list changed between calls must surface here too.
-        self.index_resource_uris_by_provider(&context).await?;
+        // Skipped for an empty composition: there is nothing to list or to duplicate.
+        if !self.providers.is_empty() {
+            self.index_resource_uris_by_provider(&context).await?;
+        }
 
-        let provider_count = self.providers.len();
-        let provider = self.providers.get(provider_index).ok_or_else(|| {
-            ErrorData::invalid_params(
-                format!(
-                    "merge cursor names provider {provider_index}, but only \
-                     {provider_count} providers are composed"
-                ),
-                None,
-            )
-        })?;
+        let (resources, next_cursor) = listing::list_one_page(
+            merge_cursor,
+            self.providers.len(),
+            |provider_index, inner_cursor| {
+                let provider = &self.providers[provider_index];
+                let context = context.clone();
+                Box::pin(async move {
+                    let result = provider
+                        .list_resources(
+                            Some(PaginatedRequestParams::default().with_cursor(inner_cursor)),
+                            context,
+                        )
+                        .await?;
+                    Ok(listing::Page {
+                        items: result.resources,
+                        next_cursor: result.next_cursor,
+                    })
+                })
+            },
+        )
+        .await?;
 
-        let page = provider
-            .list_resources(
-                Some(PaginatedRequestParams::default().with_cursor(inner_cursor)),
-                context,
-            )
-            .await?;
-
-        let next_cursor = match page.next_cursor {
-            Some(inner_next) => Some(cursor::encode(provider_index, Some(&inner_next))),
-            None if provider_index + 1 < provider_count => {
-                Some(cursor::encode(provider_index + 1, None))
-            }
-            None => None,
-        };
-
-        let mut result = ListResourcesResult::with_all_items(page.resources);
+        let mut result = ListResourcesResult::with_all_items(resources);
         result.next_cursor = next_cursor;
         Ok(result)
     }
@@ -606,44 +554,34 @@ impl ResourcesProvider for MergedResourcesProvider {
         request: Option<PaginatedRequestParams>,
         context: RequestContext<RoleServer>,
     ) -> Result<ListResourceTemplatesResult, ErrorData> {
-        let cursor = request.as_ref().and_then(|params| params.cursor.as_deref());
-        if cursor.is_none() && self.providers.is_empty() {
-            // An empty composition has no provider to page into: answer an empty page
-            // directly rather than treating provider index 0 as in range.
-            return Ok(ListResourceTemplatesResult::with_all_items(Vec::new()));
-        }
-        let (provider_index, inner_cursor) = match cursor {
-            Some(cursor) => cursor::decode(cursor)?,
-            None => (0, None),
-        };
+        let merge_cursor = request.as_ref().and_then(|params| params.cursor.as_deref());
 
-        let provider_count = self.providers.len();
-        let provider = self.providers.get(provider_index).ok_or_else(|| {
-            ErrorData::invalid_params(
-                format!(
-                    "merge cursor names provider {provider_index}, but only \
-                     {provider_count} providers are composed"
-                ),
-                None,
-            )
-        })?;
+        // No duplicate check: two providers MAY legitimately list the same resource
+        // template string (see this type's doc comment, "Resource templates are
+        // exempt").
+        let (resource_templates, next_cursor) = listing::list_one_page(
+            merge_cursor,
+            self.providers.len(),
+            |provider_index, inner_cursor| {
+                let provider = &self.providers[provider_index];
+                let context = context.clone();
+                Box::pin(async move {
+                    let result = provider
+                        .list_resource_templates(
+                            Some(PaginatedRequestParams::default().with_cursor(inner_cursor)),
+                            context,
+                        )
+                        .await?;
+                    Ok(listing::Page {
+                        items: result.resource_templates,
+                        next_cursor: result.next_cursor,
+                    })
+                })
+            },
+        )
+        .await?;
 
-        let page = provider
-            .list_resource_templates(
-                Some(PaginatedRequestParams::default().with_cursor(inner_cursor)),
-                context,
-            )
-            .await?;
-
-        let next_cursor = match page.next_cursor {
-            Some(inner_next) => Some(cursor::encode(provider_index, Some(&inner_next))),
-            None if provider_index + 1 < provider_count => {
-                Some(cursor::encode(provider_index + 1, None))
-            }
-            None => None,
-        };
-
-        let mut result = ListResourceTemplatesResult::with_all_items(page.resource_templates);
+        let mut result = ListResourceTemplatesResult::with_all_items(resource_templates);
         result.next_cursor = next_cursor;
         Ok(result)
     }
@@ -719,6 +657,7 @@ mod tests {
     use rmcp::model::{ReadResourceResult, Resource, ResourceTemplate};
     use rmcp::service::Peer;
 
+    use super::super::cursor;
     use super::*;
 
     /// An in-memory [`ResourcesProvider`] stub serving fixed resource pages, by cursor, in

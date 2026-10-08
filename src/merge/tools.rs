@@ -19,7 +19,7 @@ use rmcp::{
 
 use crate::providers::ToolsProvider;
 
-use super::cursor;
+use super::listing;
 
 /// Object-safe adapter over [`ToolsProvider`], boxing its futures.
 ///
@@ -108,22 +108,6 @@ impl<T: ToolsProvider> DynToolsProvider for T {
     }
 }
 
-/// Builds the duplicate-tool-name error [`MergedToolsProvider`] answers when
-/// `tool_name` is listed by both `first_provider_index` and `second_provider_index`.
-fn duplicate_tool_name_error(
-    tool_name: &str,
-    first_provider_index: usize,
-    second_provider_index: usize,
-) -> ErrorData {
-    ErrorData::invalid_params(
-        format!(
-            "tool {tool_name:?} is listed by both provider {first_provider_index} and \
-             provider {second_provider_index}"
-        ),
-        None,
-    )
-}
-
 /// Builds the task-id-collision error [`MergedToolsProvider::call_tool`] answers when
 /// `task_id` is already recorded for `existing_provider_index`, and a different
 /// provider, `new_provider_index`, just answered a task with the same id.
@@ -188,74 +172,52 @@ impl MergedToolsProvider {
     }
 
     /// Drains every composed provider's full tool list, following each provider's own
-    /// pagination until it answers `next_cursor: None`.
+    /// pagination until it answers `next_cursor: None`, via the shared
+    /// [`listing::drain`] skeleton.
     ///
     /// Returns each tool's name tagged with the 0-indexed provider that listed it, in
     /// provider-then-page order.
-    async fn drain_tool_names(
+    async fn drain_tools(
         &self,
         context: &RequestContext<RoleServer>,
-    ) -> Result<Vec<(usize, String)>, ErrorData> {
-        let mut named = Vec::new();
-        for (provider_index, provider) in self.providers.iter().enumerate() {
-            let mut inner_cursor = None;
-            let mut seen_inner_cursors = std::collections::HashSet::new();
-            for page_count in 0.. {
-                let page = provider
+    ) -> Result<Vec<(usize, rmcp::model::Tool)>, ErrorData> {
+        listing::drain(self.providers.len(), |provider_index, inner_cursor| {
+            let provider = &self.providers[provider_index];
+            let context = context.clone();
+            Box::pin(async move {
+                let result = provider
                     .list_tools(
                         Some(PaginatedRequestParams::default().with_cursor(inner_cursor)),
-                        context.clone(),
+                        context,
                     )
                     .await?;
-                named.extend(
-                    page.tools
-                        .iter()
-                        .map(|tool| (provider_index, tool.name.to_string())),
-                );
-                match page.next_cursor {
-                    Some(next) => {
-                        cursor::guard_drain_progress(
-                            provider_index,
-                            page_count,
-                            &next,
-                            &mut seen_inner_cursors,
-                        )?;
-                        inner_cursor = Some(next);
-                    }
-                    None => break,
-                }
-            }
-        }
-        Ok(named)
+                Ok(listing::Page {
+                    items: result.tools,
+                    next_cursor: result.next_cursor,
+                })
+            })
+        })
+        .await
     }
 
-    /// Maps every composed provider's tool names to the provider that listed them.
+    /// Maps every composed provider's tool names to the provider that listed them, via
+    /// the shared [`listing::index_by_provider`] skeleton.
     ///
     /// # Errors
     ///
-    /// Returns [`duplicate_tool_name_error`] for the first tool name found listed by
-    /// two different providers (by 0-indexed construction order).
+    /// Returns a duplicate-key error (kind `"tool"`) for the first tool name found
+    /// listed by two different providers (by 0-indexed construction order).
     async fn index_tool_names_by_provider(
         &self,
         context: &RequestContext<RoleServer>,
     ) -> Result<HashMap<String, usize>, ErrorData> {
-        let named = self.drain_tool_names(context).await?;
-        let mut owner_by_name = HashMap::new();
-        for (provider_index, tool_name) in named {
-            match owner_by_name.get(&tool_name) {
-                Some(&owning_index) if owning_index != provider_index => {
-                    return Err(duplicate_tool_name_error(
-                        &tool_name,
-                        owning_index,
-                        provider_index,
-                    ));
-                }
-                _ => {
-                    owner_by_name.insert(tool_name, provider_index);
-                }
-            }
-        }
-        Ok(owner_by_name)
+        let drained = self.drain_tools(context).await?;
+        listing::index_by_provider(
+            drained,
+            "tool",
+            |tool| tool.name.to_string(),
+            |name| name.clone(),
+        )
     }
 
     /// Looks up the composed provider that created `task_id`.
@@ -303,48 +265,38 @@ impl ToolsProvider for MergedToolsProvider {
         request: Option<PaginatedRequestParams>,
         context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
-        let cursor = request.as_ref().and_then(|params| params.cursor.as_deref());
-        if cursor.is_none() && self.providers.is_empty() {
-            // An empty composition has no provider to page into: answer an empty page
-            // directly rather than treating provider index 0 as in range.
-            return Ok(ListToolsResult::with_all_items(Vec::new()));
-        }
-        let (provider_index, inner_cursor) = match cursor {
-            Some(cursor) => cursor::decode(cursor)?,
-            None => (0, None),
-        };
+        let merge_cursor = request.as_ref().and_then(|params| params.cursor.as_deref());
 
         // Every call re-validates the whole composition: a duplicate introduced by a
         // provider whose own tool list changed between calls must surface here too.
-        self.index_tool_names_by_provider(&context).await?;
+        // Skipped for an empty composition: there is nothing to list or to duplicate.
+        if !self.providers.is_empty() {
+            self.index_tool_names_by_provider(&context).await?;
+        }
 
-        let provider_count = self.providers.len();
-        let provider = self.providers.get(provider_index).ok_or_else(|| {
-            ErrorData::invalid_params(
-                format!(
-                    "merge cursor names provider {provider_index}, but only \
-                     {provider_count} providers are composed"
-                ),
-                None,
-            )
-        })?;
+        let (tools, next_cursor) = listing::list_one_page(
+            merge_cursor,
+            self.providers.len(),
+            |provider_index, inner_cursor| {
+                let provider = &self.providers[provider_index];
+                let context = context.clone();
+                Box::pin(async move {
+                    let result = provider
+                        .list_tools(
+                            Some(PaginatedRequestParams::default().with_cursor(inner_cursor)),
+                            context,
+                        )
+                        .await?;
+                    Ok(listing::Page {
+                        items: result.tools,
+                        next_cursor: result.next_cursor,
+                    })
+                })
+            },
+        )
+        .await?;
 
-        let page = provider
-            .list_tools(
-                Some(PaginatedRequestParams::default().with_cursor(inner_cursor)),
-                context,
-            )
-            .await?;
-
-        let next_cursor = match page.next_cursor {
-            Some(inner_next) => Some(cursor::encode(provider_index, Some(&inner_next))),
-            None if provider_index + 1 < provider_count => {
-                Some(cursor::encode(provider_index + 1, None))
-            }
-            None => None,
-        };
-
-        let mut result = ListToolsResult::with_all_items(page.tools);
+        let mut result = ListToolsResult::with_all_items(tools);
         result.next_cursor = next_cursor;
         Ok(result)
     }
@@ -468,6 +420,7 @@ mod tests {
     };
     use rmcp::service::Peer;
 
+    use super::super::cursor;
     use super::*;
 
     /// A fixed task id every [`TaskStub`] creates, so a test can route by it without a

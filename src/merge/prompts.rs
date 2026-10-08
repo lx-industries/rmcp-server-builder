@@ -18,7 +18,7 @@ use rmcp::{
 
 use crate::providers::PromptsProvider;
 
-use super::cursor;
+use super::listing;
 
 /// Object-safe adapter over [`PromptsProvider`], boxing its futures.
 ///
@@ -64,22 +64,6 @@ impl<T: PromptsProvider> DynPromptsProvider for T {
     }
 }
 
-/// Builds the duplicate-prompt-name error [`MergedPromptsProvider`] answers when
-/// `prompt_name` is listed by both `first_provider_index` and `second_provider_index`.
-fn duplicate_prompt_name_error(
-    prompt_name: &str,
-    first_provider_index: usize,
-    second_provider_index: usize,
-) -> ErrorData {
-    ErrorData::invalid_params(
-        format!(
-            "prompt {prompt_name:?} is listed by both provider {first_provider_index} and \
-             provider {second_provider_index}"
-        ),
-        None,
-    )
-}
-
 /// Composes several [`PromptsProvider`]s into one prompts capability.
 ///
 /// `list_prompts` concatenates every inner provider's prompts, in construction order.
@@ -119,75 +103,53 @@ impl MergedPromptsProvider {
         self
     }
 
-    /// Drains every composed provider's full prompt list, following each provider's own
-    /// pagination until it answers `next_cursor: None`.
+    /// Drains every composed provider's full prompt list, following each provider's
+    /// own pagination until it answers `next_cursor: None`, via the shared
+    /// [`listing::drain`] skeleton.
     ///
-    /// Returns each prompt's name tagged with the 0-indexed provider that listed it, in
+    /// Returns each prompt tagged with the 0-indexed provider that listed it, in
     /// provider-then-page order.
-    async fn drain_prompt_names(
+    async fn drain_prompts(
         &self,
         context: &RequestContext<RoleServer>,
-    ) -> Result<Vec<(usize, String)>, ErrorData> {
-        let mut named = Vec::new();
-        for (provider_index, provider) in self.providers.iter().enumerate() {
-            let mut inner_cursor = None;
-            let mut seen_inner_cursors = std::collections::HashSet::new();
-            for page_count in 0.. {
-                let page = provider
+    ) -> Result<Vec<(usize, rmcp::model::Prompt)>, ErrorData> {
+        listing::drain(self.providers.len(), |provider_index, inner_cursor| {
+            let provider = &self.providers[provider_index];
+            let context = context.clone();
+            Box::pin(async move {
+                let result = provider
                     .list_prompts(
                         Some(PaginatedRequestParams::default().with_cursor(inner_cursor)),
-                        context.clone(),
+                        context,
                     )
                     .await?;
-                named.extend(
-                    page.prompts
-                        .iter()
-                        .map(|prompt| (provider_index, prompt.name.clone())),
-                );
-                match page.next_cursor {
-                    Some(next) => {
-                        cursor::guard_drain_progress(
-                            provider_index,
-                            page_count,
-                            &next,
-                            &mut seen_inner_cursors,
-                        )?;
-                        inner_cursor = Some(next);
-                    }
-                    None => break,
-                }
-            }
-        }
-        Ok(named)
+                Ok(listing::Page {
+                    items: result.prompts,
+                    next_cursor: result.next_cursor,
+                })
+            })
+        })
+        .await
     }
 
-    /// Maps every composed provider's prompt names to the provider that listed them.
+    /// Maps every composed provider's prompt names to the provider that listed them,
+    /// via the shared [`listing::index_by_provider`] skeleton.
     ///
     /// # Errors
     ///
-    /// Returns [`duplicate_prompt_name_error`] for the first prompt name found listed by
-    /// two different providers (by 0-indexed construction order).
+    /// Returns a duplicate-key error (kind `"prompt"`) for the first prompt name
+    /// found listed by two different providers (by 0-indexed construction order).
     async fn index_prompt_names_by_provider(
         &self,
         context: &RequestContext<RoleServer>,
     ) -> Result<HashMap<String, usize>, ErrorData> {
-        let named = self.drain_prompt_names(context).await?;
-        let mut owner_by_name = HashMap::new();
-        for (provider_index, prompt_name) in named {
-            match owner_by_name.get(&prompt_name) {
-                Some(&owning_index) if owning_index != provider_index => {
-                    return Err(duplicate_prompt_name_error(
-                        &prompt_name,
-                        owning_index,
-                        provider_index,
-                    ));
-                }
-                _ => {
-                    owner_by_name.insert(prompt_name, provider_index);
-                }
-            }
-        }
-        Ok(owner_by_name)
+        let drained = self.drain_prompts(context).await?;
+        listing::index_by_provider(
+            drained,
+            "prompt",
+            |prompt| prompt.name.clone(),
+            |name| name.clone(),
+        )
     }
 }
 
@@ -203,48 +165,38 @@ impl PromptsProvider for MergedPromptsProvider {
         request: Option<PaginatedRequestParams>,
         context: RequestContext<RoleServer>,
     ) -> Result<ListPromptsResult, ErrorData> {
-        let cursor = request.as_ref().and_then(|params| params.cursor.as_deref());
-        if cursor.is_none() && self.providers.is_empty() {
-            // An empty composition has no provider to page into: answer an empty page
-            // directly rather than treating provider index 0 as in range.
-            return Ok(ListPromptsResult::with_all_items(Vec::new()));
-        }
-        let (provider_index, inner_cursor) = match cursor {
-            Some(cursor) => cursor::decode(cursor)?,
-            None => (0, None),
-        };
+        let merge_cursor = request.as_ref().and_then(|params| params.cursor.as_deref());
 
         // Every call re-validates the whole composition: a duplicate introduced by a
         // provider whose own prompt list changed between calls must surface here too.
-        self.index_prompt_names_by_provider(&context).await?;
+        // Skipped for an empty composition: there is nothing to list or to duplicate.
+        if !self.providers.is_empty() {
+            self.index_prompt_names_by_provider(&context).await?;
+        }
 
-        let provider_count = self.providers.len();
-        let provider = self.providers.get(provider_index).ok_or_else(|| {
-            ErrorData::invalid_params(
-                format!(
-                    "merge cursor names provider {provider_index}, but only \
-                     {provider_count} providers are composed"
-                ),
-                None,
-            )
-        })?;
+        let (prompts, next_cursor) = listing::list_one_page(
+            merge_cursor,
+            self.providers.len(),
+            |provider_index, inner_cursor| {
+                let provider = &self.providers[provider_index];
+                let context = context.clone();
+                Box::pin(async move {
+                    let result = provider
+                        .list_prompts(
+                            Some(PaginatedRequestParams::default().with_cursor(inner_cursor)),
+                            context,
+                        )
+                        .await?;
+                    Ok(listing::Page {
+                        items: result.prompts,
+                        next_cursor: result.next_cursor,
+                    })
+                })
+            },
+        )
+        .await?;
 
-        let page = provider
-            .list_prompts(
-                Some(PaginatedRequestParams::default().with_cursor(inner_cursor)),
-                context,
-            )
-            .await?;
-
-        let next_cursor = match page.next_cursor {
-            Some(inner_next) => Some(cursor::encode(provider_index, Some(&inner_next))),
-            None if provider_index + 1 < provider_count => {
-                Some(cursor::encode(provider_index + 1, None))
-            }
-            None => None,
-        };
-
-        let mut result = ListPromptsResult::with_all_items(page.prompts);
+        let mut result = ListPromptsResult::with_all_items(prompts);
         result.next_cursor = next_cursor;
         Ok(result)
     }
@@ -283,6 +235,7 @@ mod tests {
     use rmcp::model::{GetPromptResult, Prompt, PromptMessage, Role};
     use rmcp::service::Peer;
 
+    use super::super::cursor;
     use super::*;
 
     /// An in-memory [`PromptsProvider`] stub serving fixed pages, by cursor, in order.

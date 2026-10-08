@@ -2,6 +2,7 @@
 
 mod completion;
 mod cursor;
+mod listing;
 mod logging;
 mod prompts;
 mod resources;
