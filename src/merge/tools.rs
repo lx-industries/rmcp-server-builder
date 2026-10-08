@@ -16,11 +16,12 @@
 
 use std::collections::HashMap;
 use std::pin::Pin;
+use std::sync::Mutex;
 
 use rmcp::{
     model::{
-        CallToolRequestParams, CallToolResponse, ErrorCode, ErrorData, ListToolsResult,
-        PaginatedRequestParams,
+        CallToolRequestParams, CallToolResponse, CancelTaskParams, ErrorCode, ErrorData,
+        GetTaskParams, GetTaskResult, ListToolsResult, PaginatedRequestParams, UpdateTaskParams,
     },
     service::{RequestContext, RoleServer},
 };
@@ -51,6 +52,27 @@ trait DynToolsProvider: Send + Sync {
         request: CallToolRequestParams,
         context: RequestContext<RoleServer>,
     ) -> Pin<Box<dyn Future<Output = Result<CallToolResponse, ErrorData>> + Send + 'provider>>;
+
+    /// Object-safe counterpart of [`ToolsProvider::get_task`].
+    fn get_task<'provider>(
+        &'provider self,
+        request: GetTaskParams,
+        context: RequestContext<RoleServer>,
+    ) -> Pin<Box<dyn Future<Output = Result<GetTaskResult, ErrorData>> + Send + 'provider>>;
+
+    /// Object-safe counterpart of [`ToolsProvider::update_task`].
+    fn update_task<'provider>(
+        &'provider self,
+        request: UpdateTaskParams,
+        context: RequestContext<RoleServer>,
+    ) -> Pin<Box<dyn Future<Output = Result<(), ErrorData>> + Send + 'provider>>;
+
+    /// Object-safe counterpart of [`ToolsProvider::cancel_task`].
+    fn cancel_task<'provider>(
+        &'provider self,
+        request: CancelTaskParams,
+        context: RequestContext<RoleServer>,
+    ) -> Pin<Box<dyn Future<Output = Result<(), ErrorData>> + Send + 'provider>>;
 }
 
 impl<T: ToolsProvider> DynToolsProvider for T {
@@ -69,6 +91,30 @@ impl<T: ToolsProvider> DynToolsProvider for T {
     ) -> Pin<Box<dyn Future<Output = Result<CallToolResponse, ErrorData>> + Send + 'provider>> {
         Box::pin(ToolsProvider::call_tool(self, request, context))
     }
+
+    fn get_task<'provider>(
+        &'provider self,
+        request: GetTaskParams,
+        context: RequestContext<RoleServer>,
+    ) -> Pin<Box<dyn Future<Output = Result<GetTaskResult, ErrorData>> + Send + 'provider>> {
+        Box::pin(ToolsProvider::get_task(self, request, context))
+    }
+
+    fn update_task<'provider>(
+        &'provider self,
+        request: UpdateTaskParams,
+        context: RequestContext<RoleServer>,
+    ) -> Pin<Box<dyn Future<Output = Result<(), ErrorData>> + Send + 'provider>> {
+        Box::pin(ToolsProvider::update_task(self, request, context))
+    }
+
+    fn cancel_task<'provider>(
+        &'provider self,
+        request: CancelTaskParams,
+        context: RequestContext<RoleServer>,
+    ) -> Pin<Box<dyn Future<Output = Result<(), ErrorData>> + Send + 'provider>> {
+        Box::pin(ToolsProvider::cancel_task(self, request, context))
+    }
 }
 
 /// Builds the duplicate-tool-name error [`MergedToolsProvider`] answers when
@@ -82,6 +128,23 @@ fn duplicate_tool_name_error(
         format!(
             "tool {tool_name:?} is listed by both provider {first_provider_index} and \
              provider {second_provider_index}"
+        ),
+        None,
+    )
+}
+
+/// Builds the task-id-collision error [`MergedToolsProvider::call_tool`] answers when
+/// `task_id` is already recorded for `existing_provider_index`, and a different
+/// provider, `new_provider_index`, just answered a task with the same id.
+fn task_id_collision_error(
+    task_id: &str,
+    existing_provider_index: usize,
+    new_provider_index: usize,
+) -> ErrorData {
+    ErrorData::invalid_params(
+        format!(
+            "task id {task_id:?} is already owned by provider {existing_provider_index}, \
+             but provider {new_provider_index} just created a task with the same id"
         ),
         None,
     )
@@ -102,6 +165,12 @@ fn duplicate_tool_name_error(
 pub struct MergedToolsProvider {
     /// The composed providers, in listing and routing order.
     providers: Vec<Box<dyn DynToolsProvider>>,
+    /// The 0-indexed composed provider that created each still-tracked task, by task id.
+    ///
+    /// `call_tool` records an entry here the moment a provider answers with
+    /// [`CallToolResponse::Task`]; `get_task`, `update_task` and `cancel_task` read it to
+    /// route a `tasks/*` call to the provider that created the task.
+    provider_index_by_task_id: Mutex<HashMap<String, usize>>,
 }
 
 impl MergedToolsProvider {
@@ -112,6 +181,7 @@ impl MergedToolsProvider {
     pub fn new() -> Self {
         Self {
             providers: Vec::new(),
+            provider_index_by_task_id: Mutex::new(HashMap::new()),
         }
     }
 
@@ -196,6 +266,38 @@ impl MergedToolsProvider {
         }
         Ok(owner_by_name)
     }
+
+    /// Looks up the composed provider that created `task_id`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err(ErrorData::new(ErrorCode::INVALID_PARAMS, ...))` naming `task_id` when
+    /// no [`MergedToolsProvider::call_tool`] call recorded it (never created, or created by
+    /// a `MergedToolsProvider` this one is not).
+    fn owning_provider_index(&self, task_id: &str) -> Result<usize, ErrorData> {
+        self.provider_index_by_task_id
+            .lock()
+            .expect("provider_index_by_task_id mutex poisoned")
+            .get(task_id)
+            .copied()
+            .ok_or_else(|| {
+                ErrorData::new(
+                    ErrorCode::INVALID_PARAMS,
+                    format!("no task with id {task_id:?} is known"),
+                    None,
+                )
+            })
+    }
+
+    /// Removes `task_id` from [`MergedToolsProvider::provider_index_by_task_id`], once
+    /// its owning provider answers a terminal status (`get_task`) or a successful
+    /// cancellation (`cancel_task`).
+    fn evict_task_id(&self, task_id: &str) {
+        self.provider_index_by_task_id
+            .lock()
+            .expect("provider_index_by_task_id mutex poisoned")
+            .remove(task_id);
+    }
 }
 
 impl Default for MergedToolsProvider {
@@ -279,7 +381,90 @@ impl ToolsProvider for MergedToolsProvider {
             .get(provider_index)
             .expect("index_tool_names_by_provider only returns in-range provider indices");
 
-        provider.call_tool(request, context).await
+        let response = provider.call_tool(request, context).await;
+
+        if let Ok(CallToolResponse::Task(ref created)) = response {
+            let task_id = created.task.task_id.clone();
+            let mut provider_index_by_task_id = self
+                .provider_index_by_task_id
+                .lock()
+                .expect("provider_index_by_task_id mutex poisoned");
+            match provider_index_by_task_id.get(&task_id) {
+                Some(&existing_provider_index) if existing_provider_index != provider_index => {
+                    return Err(task_id_collision_error(
+                        &task_id,
+                        existing_provider_index,
+                        provider_index,
+                    ));
+                }
+                _ => {
+                    provider_index_by_task_id.insert(task_id, provider_index);
+                }
+            }
+        }
+
+        response
+    }
+
+    /// Evicts `request.task_id` from the task-id-to-provider map once the owning
+    /// provider answers a terminal [`TaskStatus`](rmcp::model::TaskStatus) (completed,
+    /// failed, or cancelled): a terminal task never resumes, so its record would
+    /// otherwise outlive any future `get_task`, `update_task`, or `cancel_task` call
+    /// that could use it.
+    async fn get_task(
+        &self,
+        request: GetTaskParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<GetTaskResult, ErrorData> {
+        let provider_index = self.owning_provider_index(&request.task_id)?;
+        let provider = self
+            .providers
+            .get(provider_index)
+            .expect("owning_provider_index only returns in-range provider indices");
+
+        let task_id = request.task_id.clone();
+        let result = provider.get_task(request, context).await?;
+        if result.task.status().is_terminal() {
+            self.evict_task_id(&task_id);
+        }
+        Ok(result)
+    }
+
+    // `update_task` does not evict `task_id` on a terminal status: the trait's
+    // `update_task` answers `Result<(), ErrorData>` (SEP-2663's `tasks/update`
+    // acknowledgement), with no task status to inspect. `get_task` and `cancel_task`
+    // are the eviction paths; see their doc comments.
+    async fn update_task(
+        &self,
+        request: UpdateTaskParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<(), ErrorData> {
+        let provider_index = self.owning_provider_index(&request.task_id)?;
+        let provider = self
+            .providers
+            .get(provider_index)
+            .expect("owning_provider_index only returns in-range provider indices");
+
+        provider.update_task(request, context).await
+    }
+
+    /// Evicts `request.task_id` from the task-id-to-provider map once the owning
+    /// provider's `cancel_task` succeeds: cancellation is itself a terminal status.
+    async fn cancel_task(
+        &self,
+        request: CancelTaskParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<(), ErrorData> {
+        let provider_index = self.owning_provider_index(&request.task_id)?;
+        let provider = self
+            .providers
+            .get(provider_index)
+            .expect("owning_provider_index only returns in-range provider indices");
+
+        let task_id = request.task_id.clone();
+        provider.cancel_task(request, context).await?;
+        self.evict_task_id(&task_id);
+        Ok(())
     }
 }
 
@@ -287,30 +472,165 @@ impl ToolsProvider for MergedToolsProvider {
 mod tests {
     use std::sync::Mutex;
 
-    use rmcp::model::{CallToolResult, ContentBlock, RequestId, Tool};
+    use rmcp::model::{
+        CallToolResult, ContentBlock, CreateTaskResult, RequestId, Task, TaskStatus, Tool,
+    };
     use rmcp::service::Peer;
 
     use super::*;
+
+    /// A fixed task id every [`TaskStub`] creates, so a test can route by it without a
+    /// handshake with the real id generator.
+    const FIXED_TASK_ID: &str = "fixed-id";
+
+    /// How often each [`TaskStub`] method was reached, shared with the test that moves the
+    /// stub into a [`MergedToolsProvider`] composition.
+    struct TaskStubCalls {
+        get_task: Mutex<usize>,
+        update_task: Mutex<usize>,
+        cancel_task: Mutex<usize>,
+        /// The [`TaskStatus`] the owning [`TaskStub`]'s `get_task` answers; a test sets
+        /// this to a terminal status to exercise [`MergedToolsProvider`]'s task-id
+        /// eviction.
+        get_task_status: Mutex<TaskStatus>,
+    }
+
+    impl Default for TaskStubCalls {
+        fn default() -> Self {
+            Self {
+                get_task: Mutex::new(0),
+                update_task: Mutex::new(0),
+                cancel_task: Mutex::new(0),
+                get_task_status: Mutex::new(TaskStatus::Working),
+            }
+        }
+    }
+
+    /// A [`ToolsProvider`] whose `call_tool` always materializes a task with
+    /// [`FIXED_TASK_ID`], and whose `get_task`/`update_task`/`cancel_task` each count how
+    /// often they are reached, so a test can assert that `MergedToolsProvider` routed a
+    /// `tasks/*` call here rather than to another composed provider.
+    struct TaskStub {
+        tool_name: &'static str,
+        calls: std::sync::Arc<TaskStubCalls>,
+    }
+
+    impl TaskStub {
+        /// Builds a `TaskStub` listing tool `"make-task"`, and a shared handle to its
+        /// call counters.
+        fn new() -> (Self, std::sync::Arc<TaskStubCalls>) {
+            Self::with_tool_name("make-task")
+        }
+
+        /// Builds a `TaskStub` listing `tool_name`, and a shared handle to its call
+        /// counters. Every `TaskStub`, regardless of its tool name, materializes a task
+        /// with the same [`FIXED_TASK_ID`], and answers `get_task` with
+        /// [`TaskStatus::Working`] until the shared `calls.get_task_status` changes it.
+        fn with_tool_name(tool_name: &'static str) -> (Self, std::sync::Arc<TaskStubCalls>) {
+            let calls = std::sync::Arc::new(TaskStubCalls::default());
+            (
+                Self {
+                    tool_name,
+                    calls: calls.clone(),
+                },
+                calls,
+            )
+        }
+    }
+
+    impl ToolsProvider for TaskStub {
+        async fn list_tools(
+            &self,
+            _request: Option<PaginatedRequestParams>,
+            _context: RequestContext<RoleServer>,
+        ) -> Result<ListToolsResult, ErrorData> {
+            Ok(ListToolsResult::with_all_items(vec![tool(self.tool_name)]))
+        }
+
+        async fn call_tool(
+            &self,
+            _request: CallToolRequestParams,
+            _context: RequestContext<RoleServer>,
+        ) -> Result<CallToolResponse, ErrorData> {
+            let task = Task::new(
+                FIXED_TASK_ID,
+                TaskStatus::Working,
+                "2026-10-08T00:00:00Z",
+                "2026-10-08T00:00:00Z",
+            );
+            Ok(CreateTaskResult::new(task).into())
+        }
+
+        async fn get_task(
+            &self,
+            request: GetTaskParams,
+            _context: RequestContext<RoleServer>,
+        ) -> Result<GetTaskResult, ErrorData> {
+            *self.calls.get_task.lock().expect("lock") += 1;
+            let status = *self.calls.get_task_status.lock().expect("lock");
+            let task = Task::new(
+                request.task_id,
+                status,
+                "2026-10-08T00:00:00Z",
+                "2026-10-08T00:00:00Z",
+            );
+            let payload = match status {
+                TaskStatus::Completed => rmcp::model::TaskPayload::Completed {
+                    result: rmcp::model::JsonObject::new(),
+                },
+                TaskStatus::Failed => rmcp::model::TaskPayload::Failed {
+                    error: rmcp::model::JsonObject::new(),
+                },
+                TaskStatus::Cancelled => rmcp::model::TaskPayload::Cancelled,
+                _ => rmcp::model::TaskPayload::Working,
+            };
+            Ok(GetTaskResult::new(rmcp::model::DetailedTask::new(
+                task, payload,
+            )))
+        }
+
+        async fn update_task(
+            &self,
+            _request: UpdateTaskParams,
+            _context: RequestContext<RoleServer>,
+        ) -> Result<(), ErrorData> {
+            *self.calls.update_task.lock().expect("lock") += 1;
+            Ok(())
+        }
+
+        async fn cancel_task(
+            &self,
+            _request: CancelTaskParams,
+            _context: RequestContext<RoleServer>,
+        ) -> Result<(), ErrorData> {
+            *self.calls.cancel_task.lock().expect("lock") += 1;
+            Ok(())
+        }
+    }
 
     /// An in-memory [`ToolsProvider`] stub serving fixed pages, by cursor, in order.
     ///
     /// `pages` is consumed front-to-back: the first page answers a `None` cursor, and
     /// each page's own `Option<String>` cursor value is the one the *next* `list_tools`
-    /// call must present for `Stub` to serve the following page.
+    /// call must present for `Stub` to serve the following page. `call_tool` answers its
+    /// own `label` tagged together with the requested name, so a test can assert which
+    /// stub a routed call reached, not merely that some stub answered.
     struct Stub {
+        label: &'static str,
         pages: Mutex<Vec<(Vec<Tool>, Option<String>)>>,
     }
 
     impl Stub {
-        fn new(pages: Vec<(Vec<Tool>, Option<String>)>) -> Self {
+        fn new(label: &'static str, pages: Vec<(Vec<Tool>, Option<String>)>) -> Self {
             Self {
+                label,
                 pages: Mutex::new(pages),
             }
         }
 
         /// A stub with every tool on a single page (`next_cursor: None`).
-        fn single_page(tools: Vec<Tool>) -> Self {
-            Self::new(vec![(tools, None)])
+        fn single_page(label: &'static str, tools: Vec<Tool>) -> Self {
+            Self::new(label, vec![(tools, None)])
         }
     }
 
@@ -345,7 +665,8 @@ mod tests {
             _context: RequestContext<RoleServer>,
         ) -> Result<CallToolResponse, ErrorData> {
             Ok(CallToolResult::success(vec![ContentBlock::text(format!(
-                "ran {name}",
+                "provider {label} ran {name}",
+                label = self.label,
                 name = request.name
             ))])
             .into())
@@ -423,8 +744,8 @@ mod tests {
         // every `next_cursor` sees all 4 tools, concatenated in provider order, across
         // the two merge-level pages this composition produces (one per provider).
         let merged = MergedToolsProvider::new()
-            .with_provider(Stub::single_page(vec![tool("a1"), tool("a2")]))
-            .with_provider(Stub::single_page(vec![tool("b1"), tool("b2")]));
+            .with_provider(Stub::single_page("A", vec![tool("a1"), tool("a2")]))
+            .with_provider(Stub::single_page("B", vec![tool("b1"), tool("b2")]));
 
         let mut all_tool_names = Vec::new();
         let mut cursor = None;
@@ -448,14 +769,20 @@ mod tests {
     #[tokio::test]
     async fn paginates_across_two_providers_with_two_pages_each() {
         let merged = MergedToolsProvider::new()
-            .with_provider(Stub::new(vec![
-                (vec![tool("a1")], Some("a-page-2".to_string())),
-                (vec![tool("a2")], None),
-            ]))
-            .with_provider(Stub::new(vec![
-                (vec![tool("b1")], Some("b-page-2".to_string())),
-                (vec![tool("b2")], None),
-            ]));
+            .with_provider(Stub::new(
+                "A",
+                vec![
+                    (vec![tool("a1")], Some("a-page-2".to_string())),
+                    (vec![tool("a2")], None),
+                ],
+            ))
+            .with_provider(Stub::new(
+                "B",
+                vec![
+                    (vec![tool("b1")], Some("b-page-2".to_string())),
+                    (vec![tool("b2")], None),
+                ],
+            ));
 
         let mut seen_tool_names = Vec::new();
         let mut cursor = None;
@@ -512,8 +839,8 @@ mod tests {
     #[tokio::test]
     async fn rejects_a_tool_name_shared_by_two_providers() {
         let merged = MergedToolsProvider::new()
-            .with_provider(Stub::single_page(vec![tool("shared")]))
-            .with_provider(Stub::single_page(vec![tool("shared")]));
+            .with_provider(Stub::single_page("A", vec![tool("shared")]))
+            .with_provider(Stub::single_page("B", vec![tool("shared")]));
 
         let error = ToolsProvider::list_tools(&merged, None, test_context().await)
             .await
@@ -525,8 +852,8 @@ mod tests {
     #[tokio::test]
     async fn routes_call_tool_to_the_provider_that_lists_the_name() {
         let merged = MergedToolsProvider::new()
-            .with_provider(Stub::single_page(vec![tool("a1")]))
-            .with_provider(Stub::single_page(vec![tool("b1")]));
+            .with_provider(Stub::single_page("A", vec![tool("a1")]))
+            .with_provider(Stub::single_page("B", vec![tool("b1")]));
 
         let response = ToolsProvider::call_tool(
             &merged,
@@ -540,12 +867,27 @@ mod tests {
             panic!("expected a complete result");
         };
         let text = result.content[0].as_text().expect("text content");
-        assert_eq!(text.text, "ran b1");
+        assert_eq!(text.text, "provider B ran b1");
+
+        let response = ToolsProvider::call_tool(
+            &merged,
+            CallToolRequestParams::new("a1"),
+            test_context().await,
+        )
+        .await
+        .expect("call_tool succeeds");
+
+        let CallToolResponse::Complete(result) = response else {
+            panic!("expected a complete result");
+        };
+        let text = result.content[0].as_text().expect("text content");
+        assert_eq!(text.text, "provider A ran a1");
     }
 
     #[tokio::test]
     async fn rejects_a_call_to_an_unknown_tool_name() {
-        let merged = MergedToolsProvider::new().with_provider(Stub::single_page(vec![tool("a1")]));
+        let merged =
+            MergedToolsProvider::new().with_provider(Stub::single_page("A", vec![tool("a1")]));
 
         let error = ToolsProvider::call_tool(
             &merged,
@@ -559,10 +901,189 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn routes_tasks_to_the_provider_that_created_them() {
+        let (task_stub, task_stub_calls) = TaskStub::new();
+        let merged = MergedToolsProvider::new()
+            .with_provider(Stub::single_page("A", vec![tool("a1")]))
+            .with_provider(task_stub);
+
+        ToolsProvider::call_tool(
+            &merged,
+            CallToolRequestParams::new("make-task"),
+            test_context().await,
+        )
+        .await
+        .expect("call_tool succeeds");
+
+        ToolsProvider::get_task(
+            &merged,
+            GetTaskParams::new(FIXED_TASK_ID),
+            test_context().await,
+        )
+        .await
+        .expect("get_task reaches the owning provider");
+        ToolsProvider::update_task(
+            &merged,
+            UpdateTaskParams::new(FIXED_TASK_ID, rmcp::model::InputResponses::default()),
+            test_context().await,
+        )
+        .await
+        .expect("update_task reaches the owning provider");
+        ToolsProvider::cancel_task(
+            &merged,
+            CancelTaskParams::new(FIXED_TASK_ID),
+            test_context().await,
+        )
+        .await
+        .expect("cancel_task reaches the owning provider");
+
+        assert_eq!(*task_stub_calls.get_task.lock().expect("lock"), 1);
+        assert_eq!(*task_stub_calls.update_task.lock().expect("lock"), 1);
+        assert_eq!(*task_stub_calls.cancel_task.lock().expect("lock"), 1);
+    }
+
+    #[tokio::test]
+    async fn a_terminal_get_task_evicts_the_task_id_record() {
+        let (task_stub, task_stub_calls) = TaskStub::new();
+        let merged = MergedToolsProvider::new().with_provider(task_stub);
+
+        ToolsProvider::call_tool(
+            &merged,
+            CallToolRequestParams::new("make-task"),
+            test_context().await,
+        )
+        .await
+        .expect("call_tool succeeds");
+
+        *task_stub_calls.get_task_status.lock().expect("lock") = TaskStatus::Completed;
+        ToolsProvider::get_task(
+            &merged,
+            GetTaskParams::new(FIXED_TASK_ID),
+            test_context().await,
+        )
+        .await
+        .expect("get_task succeeds and observes the terminal status");
+
+        let error = ToolsProvider::get_task(
+            &merged,
+            GetTaskParams::new(FIXED_TASK_ID),
+            test_context().await,
+        )
+        .await
+        .expect_err("the task-id record was evicted after the terminal get_task");
+        assert!(error.message.contains(FIXED_TASK_ID), "{error:?}");
+    }
+
+    #[tokio::test]
+    async fn a_successful_cancel_task_evicts_the_task_id_record() {
+        let (task_stub, _task_stub_calls) = TaskStub::new();
+        let merged = MergedToolsProvider::new().with_provider(task_stub);
+
+        ToolsProvider::call_tool(
+            &merged,
+            CallToolRequestParams::new("make-task"),
+            test_context().await,
+        )
+        .await
+        .expect("call_tool succeeds");
+
+        ToolsProvider::cancel_task(
+            &merged,
+            CancelTaskParams::new(FIXED_TASK_ID),
+            test_context().await,
+        )
+        .await
+        .expect("cancel_task succeeds");
+
+        let error = ToolsProvider::get_task(
+            &merged,
+            GetTaskParams::new(FIXED_TASK_ID),
+            test_context().await,
+        )
+        .await
+        .expect_err("the task-id record was evicted after the successful cancel_task");
+        assert!(error.message.contains(FIXED_TASK_ID), "{error:?}");
+    }
+
+    #[tokio::test]
+    async fn a_task_id_collision_from_a_different_provider_is_refused() {
+        let (task_stub_a, task_stub_a_calls) = TaskStub::with_tool_name("make-task-a");
+        let (task_stub_b, _task_stub_b_calls) = TaskStub::with_tool_name("make-task-b");
+        let merged = MergedToolsProvider::new()
+            .with_provider(task_stub_a)
+            .with_provider(task_stub_b);
+
+        ToolsProvider::call_tool(
+            &merged,
+            CallToolRequestParams::new("make-task-a"),
+            test_context().await,
+        )
+        .await
+        .expect("the first call_tool succeeds and records provider 0 as the owner");
+
+        let error = ToolsProvider::call_tool(
+            &merged,
+            CallToolRequestParams::new("make-task-b"),
+            test_context().await,
+        )
+        .await
+        .expect_err("a task id already owned by a different provider is refused");
+        assert!(error.message.contains(FIXED_TASK_ID), "{error:?}");
+        assert!(error.message.contains("provider 0"), "{error:?}");
+        assert!(error.message.contains("provider 1"), "{error:?}");
+
+        ToolsProvider::get_task(
+            &merged,
+            GetTaskParams::new(FIXED_TASK_ID),
+            test_context().await,
+        )
+        .await
+        .expect("tasks/get still reaches the first, unchanged owner");
+        assert_eq!(*task_stub_a_calls.get_task.lock().expect("lock"), 1);
+    }
+
+    #[tokio::test]
+    async fn rejects_tasks_calls_for_an_unknown_task_id() {
+        let (task_stub, _task_stub_calls) = TaskStub::new();
+        let merged = MergedToolsProvider::new()
+            .with_provider(Stub::single_page("A", vec![tool("a1")]))
+            .with_provider(task_stub);
+
+        const UNKNOWN_TASK_ID: &str = "unknown-id";
+
+        let get_task_error = ToolsProvider::get_task(
+            &merged,
+            GetTaskParams::new(UNKNOWN_TASK_ID),
+            test_context().await,
+        )
+        .await
+        .expect_err("get_task reports the unknown id");
+        let update_task_error = ToolsProvider::update_task(
+            &merged,
+            UpdateTaskParams::new(UNKNOWN_TASK_ID, rmcp::model::InputResponses::default()),
+            test_context().await,
+        )
+        .await
+        .expect_err("update_task reports the unknown id");
+        let cancel_task_error = ToolsProvider::cancel_task(
+            &merged,
+            CancelTaskParams::new(UNKNOWN_TASK_ID),
+            test_context().await,
+        )
+        .await
+        .expect_err("cancel_task reports the unknown id");
+
+        for error in [get_task_error, update_task_error, cancel_task_error] {
+            assert_eq!(error.code, ErrorCode::INVALID_PARAMS);
+            assert!(error.message.contains(UNKNOWN_TASK_ID), "{error:?}");
+        }
+    }
+
+    #[tokio::test]
     async fn rejects_a_call_to_a_name_shared_by_two_providers() {
         let merged = MergedToolsProvider::new()
-            .with_provider(Stub::single_page(vec![tool("shared")]))
-            .with_provider(Stub::single_page(vec![tool("shared")]));
+            .with_provider(Stub::single_page("A", vec![tool("shared")]))
+            .with_provider(Stub::single_page("B", vec![tool("shared")]));
 
         let error = ToolsProvider::call_tool(
             &merged,

@@ -3,11 +3,12 @@
 use rmcp::{
     handler::server::ServerHandler,
     model::{
-        CallToolRequestParams, CallToolResponse, CompleteRequestParams, CompleteResult, ErrorCode,
-        ErrorData, GetPromptRequestParams, GetPromptResponse, ListPromptsResult,
-        ListResourceTemplatesResult, ListResourcesResult, ListToolsResult, PaginatedRequestParams,
-        ReadResourceRequestParams, ReadResourceResponse, ServerCapabilities, ServerConfig,
-        SubscribeRequestParams, UnsubscribeRequestParams,
+        CallToolRequestParams, CallToolResponse, CancelTaskParams, CompleteRequestParams,
+        CompleteResult, ErrorCode, ErrorData, GetPromptRequestParams, GetPromptResponse,
+        GetTaskParams, GetTaskResult, ListPromptsResult, ListResourceTemplatesResult,
+        ListResourcesResult, ListToolsResult, PaginatedRequestParams, ReadResourceRequestParams,
+        ReadResourceResponse, ServerCapabilities, ServerConfig, SubscribeRequestParams,
+        UnsubscribeRequestParams, UpdateTaskParams,
     },
     service::{RequestContext, RoleServer},
 };
@@ -147,6 +148,51 @@ where
                 }
                 response => response,
             },
+            None => Err(ErrorData::new(
+                ErrorCode::METHOD_NOT_FOUND,
+                "tools not supported",
+                None,
+            )),
+        }
+    }
+
+    async fn get_task(
+        &self,
+        request: GetTaskParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<GetTaskResult, ErrorData> {
+        match &self.tools {
+            Some(provider) => provider.get_task(request, context).await,
+            None => Err(ErrorData::new(
+                ErrorCode::METHOD_NOT_FOUND,
+                "tools not supported",
+                None,
+            )),
+        }
+    }
+
+    async fn update_task(
+        &self,
+        request: UpdateTaskParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<(), ErrorData> {
+        match &self.tools {
+            Some(provider) => provider.update_task(request, context).await,
+            None => Err(ErrorData::new(
+                ErrorCode::METHOD_NOT_FOUND,
+                "tools not supported",
+                None,
+            )),
+        }
+    }
+
+    async fn cancel_task(
+        &self,
+        request: CancelTaskParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<(), ErrorData> {
+        match &self.tools {
+            Some(provider) => provider.cancel_task(request, context).await,
             None => Err(ErrorData::new(
                 ErrorCode::METHOD_NOT_FOUND,
                 "tools not supported",
@@ -317,6 +363,42 @@ impl ToolsProvider for Unset {
         _request: CallToolRequestParams,
         _context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
+        Err(ErrorData::new(
+            ErrorCode::METHOD_NOT_FOUND,
+            "tools not supported",
+            None,
+        ))
+    }
+
+    async fn get_task(
+        &self,
+        _request: GetTaskParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<GetTaskResult, ErrorData> {
+        Err(ErrorData::new(
+            ErrorCode::METHOD_NOT_FOUND,
+            "tools not supported",
+            None,
+        ))
+    }
+
+    async fn update_task(
+        &self,
+        _request: UpdateTaskParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<(), ErrorData> {
+        Err(ErrorData::new(
+            ErrorCode::METHOD_NOT_FOUND,
+            "tools not supported",
+            None,
+        ))
+    }
+
+    async fn cancel_task(
+        &self,
+        _request: CancelTaskParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<(), ErrorData> {
         Err(ErrorData::new(
             ErrorCode::METHOD_NOT_FOUND,
             "tools not supported",

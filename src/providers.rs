@@ -7,11 +7,12 @@
 use rmcp::{
     handler::server::ServerHandler,
     model::{
-        CallToolRequestParams, CallToolResponse, CompleteRequestParams, CompleteResult, ErrorData,
-        GetPromptRequestParams, GetPromptResponse, ListPromptsResult, ListResourceTemplatesResult,
+        CallToolRequestParams, CallToolResponse, CancelTaskParams, CompleteRequestParams,
+        CompleteResult, ErrorCode, ErrorData, GetPromptRequestParams, GetPromptResponse,
+        GetTaskParams, GetTaskResult, ListPromptsResult, ListResourceTemplatesResult,
         ListResourcesResult, ListToolsResult, PaginatedRequestParams, ReadResourceRequestParams,
         ReadResourceResponse, ServerCapabilities, ServerConfig, SubscribeRequestParams,
-        UnsubscribeRequestParams,
+        UnsubscribeRequestParams, UpdateTaskParams,
     },
     service::{RequestContext, RoleServer},
 };
@@ -42,6 +43,66 @@ pub trait ToolsProvider: Send + Sync + 'static {
         request: CallToolRequestParams,
         context: RequestContext<RoleServer>,
     ) -> impl Future<Output = Result<CallToolResponse, ErrorData>> + Send;
+
+    /// Get the current state of a task created by [`ToolsProvider::call_tool`].
+    ///
+    /// The default implementation answers `METHOD_NOT_FOUND`: override it to serve
+    /// `tasks/get` (SEP-2663) for a provider whose `call_tool` answers
+    /// [`CallToolResponse::Task`].
+    fn get_task(
+        &self,
+        request: GetTaskParams,
+        context: RequestContext<RoleServer>,
+    ) -> impl Future<Output = Result<GetTaskResult, ErrorData>> + Send {
+        async move {
+            let _ = (request, context);
+            Err(ErrorData::new(
+                ErrorCode::METHOD_NOT_FOUND,
+                "tasks not supported",
+                None,
+            ))
+        }
+    }
+
+    /// Deliver responses to a task's outstanding in-task input requests.
+    ///
+    /// The default implementation answers `METHOD_NOT_FOUND`: override it to serve
+    /// `tasks/update` (SEP-2663) for a provider whose `call_tool` answers
+    /// [`CallToolResponse::Task`].
+    fn update_task(
+        &self,
+        request: UpdateTaskParams,
+        context: RequestContext<RoleServer>,
+    ) -> impl Future<Output = Result<(), ErrorData>> + Send {
+        async move {
+            let _ = (request, context);
+            Err(ErrorData::new(
+                ErrorCode::METHOD_NOT_FOUND,
+                "tasks not supported",
+                None,
+            ))
+        }
+    }
+
+    /// Request cooperative cancellation of a task created by [`ToolsProvider::call_tool`].
+    ///
+    /// The default implementation answers `METHOD_NOT_FOUND`: override it to serve
+    /// `tasks/cancel` (SEP-2663) for a provider whose `call_tool` answers
+    /// [`CallToolResponse::Task`].
+    fn cancel_task(
+        &self,
+        request: CancelTaskParams,
+        context: RequestContext<RoleServer>,
+    ) -> impl Future<Output = Result<(), ErrorData>> + Send {
+        async move {
+            let _ = (request, context);
+            Err(ErrorData::new(
+                ErrorCode::METHOD_NOT_FOUND,
+                "tasks not supported",
+                None,
+            ))
+        }
+    }
 }
 
 /// Provider for prompts capability.
@@ -163,6 +224,30 @@ impl<T: ServerHandler> ToolsProvider for T {
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
         ServerHandler::call_tool(self, request, context).await
+    }
+
+    async fn get_task(
+        &self,
+        request: GetTaskParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<GetTaskResult, ErrorData> {
+        ServerHandler::get_task(self, request, context).await
+    }
+
+    async fn update_task(
+        &self,
+        request: UpdateTaskParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<(), ErrorData> {
+        ServerHandler::update_task(self, request, context).await
+    }
+
+    async fn cancel_task(
+        &self,
+        request: CancelTaskParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<(), ErrorData> {
+        ServerHandler::cancel_task(self, request, context).await
     }
 }
 
