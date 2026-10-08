@@ -535,7 +535,7 @@ mod tests {
     };
 
     use super::{ServerHandler, Unset};
-    use crate::{ServerBuilder, SimpleInfo};
+    use crate::{MergedToolsProvider, ServerBuilder, SimpleInfo};
 
     /// Capabilities that advertise every provider-backed capability, with every subflag set.
     fn advertised_capabilities() -> ServerCapabilities {
@@ -610,5 +610,20 @@ mod tests {
         let capabilities = server.get_info().capabilities;
 
         assert_eq!(capabilities, advertised_capabilities());
+    }
+
+    /// A merged tools provider is a tools provider like any other: the subflag it
+    /// advertises comes from the info provider's base capabilities, not from the
+    /// provider slot's concrete type (see `combined_capabilities`).
+    #[test]
+    fn a_merged_tools_provider_keeps_the_subflags_the_info_provider_configures() {
+        let server = ServerBuilder::new()
+            .info(info(advertised_capabilities()))
+            .tools(MergedToolsProvider::new())
+            .build();
+
+        let capabilities = server.get_info().capabilities;
+
+        assert_eq!(capabilities.tools, advertised_capabilities().tools);
     }
 }

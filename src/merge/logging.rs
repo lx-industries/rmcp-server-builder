@@ -2,15 +2,6 @@
 //!
 //! [`MergedLoggingProvider`] fans a `set_level` call out to every composed provider.
 
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "consumed once src/lib.rs re-exports MergedLoggingProvider (task 9); \
-                  exercised directly by this module's own tests until then"
-    )
-)]
-
 use std::pin::Pin;
 
 use rmcp::{

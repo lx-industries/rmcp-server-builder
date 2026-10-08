@@ -17,15 +17,6 @@
 //! last one, is a routing error naming the URI (and the candidates, where there is more
 //! than one).
 
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "consumed once src/lib.rs re-exports MergedResourcesProvider (task 9); \
-                  exercised directly by this module's own tests until then"
-    )
-)]
-
 use std::collections::HashMap;
 use std::pin::Pin;
 
@@ -311,9 +302,12 @@ mod template_matches_tests {
 ///
 /// `list_resources` concatenates every inner provider's resources, in construction order.
 /// `list_resource_templates` concatenates every inner provider's resource templates the
-/// same way. `read_resource`, `subscribe`, and `unsubscribe` route a call to one owning
-/// inner provider: see [`MergedResourcesProvider::resolve_provider_index_for_uri`] for the
-/// routing order.
+/// same way. `read_resource` and `subscribe` route a call to one owning inner provider:
+/// see `resolve_provider_index_for_uri` (private) for the routing order. `unsubscribe`
+/// routes to the provider a prior successful `subscribe` for the same URI reached, so
+/// it reaches the same provider even if the listings routing reads have since changed;
+/// an `unsubscribe` of a URI this composition never subscribed resolves its owner the
+/// same way `read_resource` does.
 ///
 /// # Duplicate resource URIs
 ///
@@ -332,6 +326,13 @@ mod template_matches_tests {
 pub struct MergedResourcesProvider {
     /// The composed providers, in listing order.
     providers: Vec<Box<dyn DynResourcesProvider>>,
+    /// The 0-indexed composed provider a successful `subscribe` reached, by URI.
+    ///
+    /// `unsubscribe` consults this before falling back to
+    /// [`MergedResourcesProvider::resolve_provider_index_for_uri`], so it reaches the
+    /// same provider `subscribe` did even when the listings that routing reads have
+    /// since changed.
+    provider_index_by_subscribed_uri: std::sync::Mutex<HashMap<String, usize>>,
 }
 
 impl MergedResourcesProvider {
@@ -342,6 +343,7 @@ impl MergedResourcesProvider {
     pub fn new() -> Self {
         Self {
             providers: Vec::new(),
+            provider_index_by_subscribed_uri: std::sync::Mutex::new(HashMap::new()),
         }
     }
 
@@ -667,9 +669,15 @@ impl ResourcesProvider for MergedResourcesProvider {
         let provider_index = self
             .resolve_provider_index_for_uri(&request.uri, &context)
             .await?;
+        let uri = request.uri.clone();
         self.providers[provider_index]
             .subscribe(request, context)
-            .await
+            .await?;
+        self.provider_index_by_subscribed_uri
+            .lock()
+            .expect("provider_index_by_subscribed_uri mutex poisoned")
+            .insert(uri, provider_index);
+        Ok(())
     }
 
     async fn unsubscribe(
@@ -677,12 +685,30 @@ impl ResourcesProvider for MergedResourcesProvider {
         request: UnsubscribeRequestParams,
         context: RequestContext<RoleServer>,
     ) -> Result<(), ErrorData> {
-        let provider_index = self
-            .resolve_provider_index_for_uri(&request.uri, &context)
-            .await?;
+        let recorded_provider_index = self
+            .provider_index_by_subscribed_uri
+            .lock()
+            .expect("provider_index_by_subscribed_uri mutex poisoned")
+            .get(&request.uri)
+            .copied();
+
+        let provider_index = match recorded_provider_index {
+            Some(provider_index) => provider_index,
+            None => {
+                self.resolve_provider_index_for_uri(&request.uri, &context)
+                    .await?
+            }
+        };
+
+        let uri = request.uri.clone();
         self.providers[provider_index]
             .unsubscribe(request, context)
-            .await
+            .await?;
+        self.provider_index_by_subscribed_uri
+            .lock()
+            .expect("provider_index_by_subscribed_uri mutex poisoned")
+            .remove(&uri);
+        Ok(())
     }
 }
 
@@ -835,7 +861,10 @@ mod tests {
             _request: UnsubscribeRequestParams,
             _context: RequestContext<RoleServer>,
         ) -> Result<(), ErrorData> {
-            unimplemented!("not exercised by this module's tests")
+            if let Some(call_log) = &self.call_log {
+                call_log.lock().expect("call log lock").push(self.name);
+            }
+            Ok(())
         }
     }
 
@@ -1372,5 +1401,100 @@ mod tests {
         .expect("subscribe succeeds");
 
         assert_eq!(*call_log.lock().expect("call log lock"), vec!["b", "b"]);
+    }
+
+    /// A [`ResourcesProvider`] whose resource list is a shared, externally mutable
+    /// `Vec<Resource>`, so a test can change what a provider lists after a prior
+    /// `subscribe` already routed by the old listing.
+    struct MutableListingStub {
+        name: &'static str,
+        resources: Arc<Mutex<Vec<Resource>>>,
+        call_log: Arc<Mutex<Vec<&'static str>>>,
+    }
+
+    impl ResourcesProvider for MutableListingStub {
+        async fn list_resources(
+            &self,
+            _request: Option<PaginatedRequestParams>,
+            _context: RequestContext<RoleServer>,
+        ) -> Result<ListResourcesResult, ErrorData> {
+            Ok(ListResourcesResult::with_all_items(
+                self.resources.lock().expect("resources lock").clone(),
+            ))
+        }
+
+        async fn list_resource_templates(
+            &self,
+            _request: Option<PaginatedRequestParams>,
+            _context: RequestContext<RoleServer>,
+        ) -> Result<ListResourceTemplatesResult, ErrorData> {
+            Ok(ListResourceTemplatesResult::with_all_items(Vec::new()))
+        }
+
+        async fn read_resource(
+            &self,
+            _request: ReadResourceRequestParams,
+            _context: RequestContext<RoleServer>,
+        ) -> Result<ReadResourceResponse, ErrorData> {
+            unimplemented!("not exercised by this test")
+        }
+
+        async fn subscribe(
+            &self,
+            _request: SubscribeRequestParams,
+            _context: RequestContext<RoleServer>,
+        ) -> Result<(), ErrorData> {
+            self.call_log.lock().expect("call log lock").push(self.name);
+            Ok(())
+        }
+
+        async fn unsubscribe(
+            &self,
+            _request: UnsubscribeRequestParams,
+            _context: RequestContext<RoleServer>,
+        ) -> Result<(), ErrorData> {
+            self.call_log.lock().expect("call log lock").push(self.name);
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn unsubscribe_follows_the_provider_subscribe_reached_despite_a_listing_change() {
+        let call_log = Arc::new(Mutex::new(Vec::new()));
+        let a_resources = Arc::new(Mutex::new(vec![resource("blob://item")]));
+        let merged = MergedResourcesProvider::new()
+            .with_provider(MutableListingStub {
+                name: "a",
+                resources: a_resources.clone(),
+                call_log: call_log.clone(),
+            })
+            .with_provider(MutableListingStub {
+                name: "b",
+                resources: Arc::new(Mutex::new(vec![resource("blob://other")])),
+                call_log: call_log.clone(),
+            });
+
+        ResourcesProvider::subscribe(
+            &merged,
+            SubscribeRequestParams::new("blob://item"),
+            test_context().await,
+        )
+        .await
+        .expect("subscribe reaches provider a via the exact-URI match");
+
+        // Provider a no longer lists "blob://item": a fresh resolve would fall back to
+        // scheme ownership, which provider b alone would hold (it still lists a
+        // "blob://" resource, while a's remaining listing is empty).
+        a_resources.lock().expect("resources lock").clear();
+
+        ResourcesProvider::unsubscribe(
+            &merged,
+            UnsubscribeRequestParams::new("blob://item"),
+            test_context().await,
+        )
+        .await
+        .expect("unsubscribe succeeds");
+
+        assert_eq!(*call_log.lock().expect("call log lock"), vec!["a", "a"]);
     }
 }

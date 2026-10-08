@@ -14,13 +14,6 @@
 /// The format is `{provider_index}:N` when `inner` is [`None`], or
 /// `{provider_index}:S{byte_length}:{inner}` when `inner` is [`Some`]. The explicit byte
 /// length lets [`decode`] recover `inner` verbatim even when it contains `:`.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "consumed by the pagination composition of later merge-provider tasks"
-    )
-)]
 pub(crate) fn encode(provider_index: usize, inner: Option<&str>) -> String {
     match inner {
         None => format!("{provider_index}:N"),
@@ -35,13 +28,6 @@ pub(crate) fn encode(provider_index: usize, inner: Option<&str>) -> String {
 /// Returns [`ErrorData::invalid_params`](rmcp::model::ErrorData::invalid_params) naming
 /// `cursor` when it has no valid provider index, no recognized `N`/`S` tag, or a declared
 /// inner-cursor length that does not match what follows.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "consumed by the pagination composition of later merge-provider tasks"
-    )
-)]
 pub(crate) fn decode(cursor: &str) -> Result<(usize, Option<String>), rmcp::model::ErrorData> {
     let malformed = || {
         rmcp::model::ErrorData::invalid_params(format!("malformed merge cursor: {cursor:?}"), None)

@@ -49,6 +49,10 @@ mod providers;
 mod server;
 
 pub use builder::{ServerBuilder, SimpleInfo};
+pub use merge::{
+    MergedCompletionProvider, MergedLoggingProvider, MergedPromptsProvider,
+    MergedResourcesProvider, MergedToolsProvider,
+};
 pub use providers::{
     CompletionProvider, LoggingProvider, PromptsProvider, ResourcesProvider, ServerInfoProvider,
     ToolsProvider,

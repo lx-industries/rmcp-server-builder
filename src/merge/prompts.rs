@@ -5,15 +5,6 @@
 //! A prompt name listed by more than one provider is a composition error, not a silent
 //! pick of one provider over the other.
 
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "consumed once src/lib.rs re-exports MergedPromptsProvider (task 9); \
-                  exercised directly by this module's own tests until then"
-    )
-)]
-
 use std::collections::HashMap;
 use std::pin::Pin;
 

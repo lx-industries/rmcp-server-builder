@@ -5,15 +5,6 @@
 //! A tool name listed by more than one provider is a composition error, not a silent
 //! pick of one provider over the other.
 
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "consumed once src/lib.rs re-exports MergedToolsProvider (task 9); \
-                  exercised directly by this module's own tests until then"
-    )
-)]
-
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Mutex;

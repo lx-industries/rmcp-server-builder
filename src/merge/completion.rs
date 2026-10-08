@@ -10,15 +10,6 @@
 //! `handler/server.rs`, around line 406 of rmcp 3.5.1): an unmatched reference is not a
 //! composition error.
 
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "consumed once src/lib.rs re-exports MergedCompletionProvider (task 9); \
-                  exercised directly by this module's own tests until then"
-    )
-)]
-
 use std::pin::Pin;
 
 use rmcp::{
