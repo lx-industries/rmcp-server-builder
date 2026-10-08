@@ -44,6 +44,7 @@
 //! are configured. If you set a tools provider, `capabilities.tools` will be enabled.
 
 mod builder;
+mod merge;
 mod providers;
 mod server;
 
