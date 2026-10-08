@@ -2,6 +2,7 @@
 
 mod completion;
 mod cursor;
+mod logging;
 mod prompts;
 mod resources;
 mod tools;
@@ -11,6 +12,11 @@ mod tools;
     reason = "src/lib.rs re-exports MergedCompletionProvider in a later task (task 9)"
 )]
 pub use completion::MergedCompletionProvider;
+#[expect(
+    unused_imports,
+    reason = "src/lib.rs re-exports MergedLoggingProvider in a later task (task 9)"
+)]
+pub use logging::MergedLoggingProvider;
 #[expect(
     unused_imports,
     reason = "src/lib.rs re-exports MergedPromptsProvider in a later task (task 9)"
