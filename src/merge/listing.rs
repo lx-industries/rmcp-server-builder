@@ -136,6 +136,41 @@ pub(crate) fn index_by_provider<T, K: Eq + Hash + Clone>(
     Ok(owner_by_key)
 }
 
+/// The provider that lists `key` in an already-[`drain`]ed item list; `None` when no
+/// provider lists it. Unlike [`index_by_provider`], a duplicate of another key does not
+/// fail the lookup: only `key` itself is checked.
+///
+/// # Errors
+///
+/// Returns [`duplicate_key_error`] (tagged `kind`) when two different providers list
+/// `key`, naming the first two by 0-indexed construction order.
+pub(crate) fn owner_of<T>(
+    drained: &[(usize, T)],
+    kind: &str,
+    key: &str,
+    key_of: impl Fn(&T) -> &str,
+) -> Result<Option<usize>, ErrorData> {
+    let mut owner = None;
+    for (provider_index, item) in drained {
+        if key_of(item) != key {
+            continue;
+        }
+        match owner {
+            None => owner = Some(*provider_index),
+            Some(owning_index) if owning_index != *provider_index => {
+                return Err(duplicate_key_error(
+                    kind,
+                    key,
+                    owning_index,
+                    *provider_index,
+                ));
+            }
+            Some(_) => {}
+        }
+    }
+    Ok(owner)
+}
+
 /// Serves exactly one composed provider's one page, resolved from `cursor` the same
 /// way every merge-level `list_*` method does: a cursor-free request starts at
 /// provider 0; an empty composition with no cursor answers an empty page directly,
@@ -179,4 +214,43 @@ pub(crate) async fn list_one_page<'provider, T>(
     };
 
     Ok((page.items, next_cursor))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_key_listed_by_two_providers_is_a_duplicate_naming_both() {
+        let drained = vec![(0, "shared"), (1, "shared")];
+
+        let error = owner_of(&drained, "tool", "shared", |key| key)
+            .expect_err("two providers list the key");
+
+        assert_eq!(error, duplicate_key_error("tool", "shared", 0, 1));
+    }
+
+    #[test]
+    fn a_key_listed_twice_by_the_same_provider_has_that_owner() {
+        let drained = vec![(0, "repeated"), (0, "repeated")];
+
+        assert_eq!(
+            owner_of(&drained, "tool", "repeated", |key| key),
+            Ok(Some(0))
+        );
+    }
+
+    #[test]
+    fn a_unique_key_has_its_owner_while_another_key_is_duplicated() {
+        let drained = vec![(0, "shared"), (1, "shared"), (1, "unique")];
+
+        assert_eq!(owner_of(&drained, "tool", "unique", |key| key), Ok(Some(1)));
+    }
+
+    #[test]
+    fn a_key_no_provider_lists_has_no_owner() {
+        let drained = vec![(0, "unique")];
+
+        assert_eq!(owner_of(&drained, "tool", "absent", |key| key), Ok(None));
+    }
 }

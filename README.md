@@ -74,8 +74,13 @@ Three rules hold across every merging type:
 
 - **Duplicate is an error.** A tool name, a prompt name, or a resource URI listed by
   more than one composed provider is a composition error, not a silent pick of one
-  provider over another. A resource template string MAY recur across providers:
-  two providers can describe the same URI shape over disjoint data.
+  provider over another. `list_*` fails naming the duplicated key and the two
+  providers that list it. A call of a tool name fails only when that name itself is
+  duplicated; a call of any other, unique tool name still routes. Known limitation: a
+  call drains every provider's `list_tools` first, so a failing `list_tools` of any one
+  provider fails every tool call. A resource
+  template string MAY recur across providers: two providers can describe the same
+  URI shape over disjoint data.
 - **Cursor composition.** A merged provider's own pagination cursor wraps which
   composed provider listed a page and that provider's own cursor, so a client's
   pagination loop sees one list, drained provider by provider.

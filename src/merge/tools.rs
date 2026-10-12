@@ -132,11 +132,13 @@ fn task_id_collision_error(
 ///
 /// # Duplicate tool names
 ///
-/// A tool name listed by more than one inner provider is a composition error: both
-/// [`list_tools`](ToolsProvider::list_tools) and [`call_tool`](ToolsProvider::call_tool)
-/// answer `Err(ErrorData::invalid_params(...))` naming the tool and the two providers,
-/// by their 0-indexed construction order, rather than silently preferring one provider
-/// over the other.
+/// A tool name listed by more than one inner provider is a composition error, not a
+/// silent pick of one provider over the other. [`list_tools`](ToolsProvider::list_tools)
+/// answers `Err(ErrorData::invalid_params(...))` naming the duplicated tool and the two
+/// providers that list it, by their 0-indexed construction order.
+/// [`call_tool`](ToolsProvider::call_tool) answers that same error only for a call to the
+/// duplicated name; every name with exactly one owner routes to that owner, even while
+/// another name is duplicated.
 pub struct MergedToolsProvider {
     /// The composed providers, in listing and routing order.
     providers: Vec<Box<dyn DynToolsProvider>>,
@@ -301,28 +303,37 @@ impl ToolsProvider for MergedToolsProvider {
         Ok(result)
     }
 
+    /// Routes the call to the one composed provider that lists `request.name`.
+    ///
+    /// A name listed by two providers fails with a duplicate-key error; a unique name
+    /// routes even while another name is duplicated.
+    ///
+    /// Known limitation: routing drains every provider's `list_tools` first, so a failing
+    /// `list_tools` of any one provider fails every call, also a call of a tool another
+    /// provider lists. Without the full listing the call cannot prove the name unique.
     async fn call_tool(
         &self,
         request: CallToolRequestParams,
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
-        let owner_by_name = self.index_tool_names_by_provider(&context).await?;
-
-        let provider_index = *owner_by_name.get(request.name.as_ref()).ok_or_else(|| {
-            ErrorData::new(
-                ErrorCode::METHOD_NOT_FOUND,
-                format!(
-                    "no composed provider lists tool {name:?}",
-                    name = request.name
-                ),
-                None,
-            )
-        })?;
+        let drained = self.drain_tools(&context).await?;
+        let provider_index =
+            listing::owner_of(&drained, "tool", &request.name, |tool| tool.name.as_ref())?
+                .ok_or_else(|| {
+                    ErrorData::new(
+                        ErrorCode::METHOD_NOT_FOUND,
+                        format!(
+                            "no composed provider lists tool {name:?}",
+                            name = request.name
+                        ),
+                        None,
+                    )
+                })?;
 
         let provider = self
             .providers
             .get(provider_index)
-            .expect("index_tool_names_by_provider only returns in-range provider indices");
+            .expect("owner_of only returns in-range provider indices");
 
         let response = provider.call_tool(request, context).await;
 
@@ -1021,6 +1032,27 @@ mod tests {
             assert_eq!(error.code, ErrorCode::INVALID_PARAMS);
             assert!(error.message.contains(UNKNOWN_TASK_ID), "{error:?}");
         }
+    }
+
+    #[tokio::test]
+    async fn routes_a_unique_name_while_another_name_is_shared() {
+        let merged = MergedToolsProvider::new()
+            .with_provider(Stub::single_page("A", vec![tool("shared"), tool("a1")]))
+            .with_provider(Stub::single_page("B", vec![tool("shared")]));
+
+        let response = ToolsProvider::call_tool(
+            &merged,
+            CallToolRequestParams::new("a1"),
+            test_context().await,
+        )
+        .await
+        .expect("a unique name routes");
+
+        let CallToolResponse::Complete(result) = response else {
+            panic!("expected a complete result");
+        };
+        let text = result.content[0].as_text().expect("text content");
+        assert_eq!(text.text, "provider A ran a1");
     }
 
     #[tokio::test]

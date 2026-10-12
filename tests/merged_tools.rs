@@ -209,6 +209,44 @@ async fn a_shared_tool_name_surfaces_as_a_client_visible_error() {
 }
 
 #[tokio::test]
+async fn a_unique_tool_name_routes_while_another_name_is_shared() {
+    let (server_transport, client_transport) = tokio::io::duplex(4096);
+    let server = ServerBuilder::new()
+        .info(Implementation::new("test-server", "1.0.0"))
+        .tools(
+            MergedToolsProvider::new()
+                .with_provider(Stub::single_page("A", vec![tool("shared"), tool("a1")]))
+                .with_provider(Stub::single_page("B", vec![tool("shared")])),
+        )
+        .build();
+    let server_task = tokio::spawn(async move {
+        let running = server.serve(server_transport).await.expect("serve server");
+        running.waiting().await.expect("server stops");
+    });
+
+    let client = client_configuration(ProtocolVersion::LATEST_WITH_INITIALIZE)
+        .serve(client_transport)
+        .await
+        .expect("initialize client");
+
+    let response = client.list_tools(None).await;
+    let Err(ServiceError::McpError(error)) = response else {
+        panic!("expected an MCP error, got {response:?}");
+    };
+    assert!(error.message.contains("shared"), "{error:?}");
+
+    let result = client
+        .call_tool(CallToolRequestParams::new("a1"))
+        .await
+        .expect("a unique name routes");
+    let text = result.content[0].as_text().expect("text content");
+    assert_eq!(text.text, "provider A ran a1");
+
+    client.cancel().await.expect("cancel client");
+    server_task.await.expect("server task");
+}
+
+#[tokio::test]
 async fn real_client_pages_through_four_pages_across_two_providers_in_order() {
     let (server_transport, client_transport) = tokio::io::duplex(4096);
     let server = ServerBuilder::new()
