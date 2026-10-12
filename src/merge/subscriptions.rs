@@ -50,7 +50,8 @@ impl<T: SubscriptionsProvider> DynSubscriptionsProvider for T {
 ///   owners leave it out of the acknowledgment.
 /// * `listen` runs every provider's part, also a part with an empty filter: a provider
 ///   MAY send custom notifications through the peer. The first part to end ends the
-///   stream with its outcome; the other parts are cancelled and awaited first.
+///   stream with its outcome; the other parts are cancelled and awaited first. A part
+///   that ignores its cancellation holds the stream open.
 pub struct MergedSubscriptionsProvider {
     providers: Vec<Box<dyn DynSubscriptionsProvider>>,
 }

@@ -36,9 +36,13 @@
 //!
 //! # Blanket Implementations
 //!
-//! Any type implementing `ServerHandler` automatically implements every provider trait
-//! except [`SubscriptionsProvider`], so existing servers can be used as providers without
-//! modification. [`SubscriptionsProvider`] has no blanket implementation, because
+//! Any type implementing `ServerHandler` automatically implements [`ToolsProvider`],
+//! [`PromptsProvider`], [`ResourcesProvider`], [`CompletionProvider`] and
+//! [`LoggingProvider`], so existing servers can be used as providers without modification.
+//!
+//! [`ServerInfoProvider`] has no blanket implementation: it would conflict with the
+//! implementation for [`Implementation`]. Implement it, or use [`Implementation`] or
+//! [`SimpleInfo`]. [`SubscriptionsProvider`] has no blanket implementation either, because
 //! `ServerHandler::listen` takes a `SubscriptionContext` that only `rmcp` builds.
 //!
 //! # Merging Providers
@@ -59,8 +63,8 @@
 //! | Resources | exact URI, then resource template, then registered scheme owner, then inferred URI scheme |
 //! | Completions | the `ref` the request names (a prompt or a resource template) |
 //! | Logging | fans out: every composed provider receives the call |
-//! | `tasks/*` | the provider that created the task |
 //! | Subscriptions | a URI to its one accepting provider; list-changed flags to every provider |
+//! | `tasks/*` | the provider that created the task |
 //!
 //! # Capability Auto-Detection
 //!
