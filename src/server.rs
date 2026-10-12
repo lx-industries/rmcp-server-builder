@@ -1,14 +1,16 @@
 //! The composed Server type and its ServerHandler implementation.
 
+use std::borrow::Cow;
+
 use rmcp::{
     handler::server::ServerHandler,
     model::{
         CallToolRequestParams, CallToolResponse, CancelTaskParams, CompleteRequestParams,
         CompleteResult, ErrorCode, ErrorData, GetPromptRequestParams, GetPromptResponse,
         GetTaskParams, GetTaskResult, ListPromptsResult, ListResourceTemplatesResult,
-        ListResourcesResult, ListToolsResult, PaginatedRequestParams, ReadResourceRequestParams,
-        ReadResourceResponse, ServerCapabilities, ServerConfig, SubscribeRequestParams,
-        UnsubscribeRequestParams, UpdateTaskParams,
+        ListResourcesResult, ListToolsResult, PaginatedRequestParams, ProtocolVersion,
+        ReadResourceRequestParams, ReadResourceResponse, ServerCapabilities, ServerConfig,
+        SubscribeRequestParams, UnsubscribeRequestParams, UpdateTaskParams,
     },
     service::{RequestContext, RoleServer},
 };
@@ -112,6 +114,10 @@ where
             info = info.with_instructions(instructions);
         }
         info
+    }
+
+    fn supported_protocol_versions(&self) -> Cow<'static, [ProtocolVersion]> {
+        self.info.supported_protocol_versions()
     }
 
     async fn list_tools(
@@ -545,11 +551,49 @@ impl LoggingProvider for Unset {
 mod tests {
     use rmcp::model::{
         Implementation, JsonObject, PromptsCapability, ResourcesCapability, ServerCapabilities,
-        ToolsCapability,
+        ServerConfig, ToolsCapability,
     };
 
     use super::{ServerHandler, Unset};
     use crate::{MergedToolsProvider, ServerBuilder, SimpleInfo};
+
+    /// An info provider that implements only protocol version 2026-07-28.
+    struct LatestOnlyInfo;
+
+    impl crate::ServerInfoProvider for LatestOnlyInfo {
+        fn get_info(&self) -> ServerConfig {
+            ServerConfig::new(ServerCapabilities::default())
+                .with_server_info(Implementation::new("test", "1.0.0"))
+        }
+
+        fn supported_protocol_versions(
+            &self,
+        ) -> std::borrow::Cow<'static, [rmcp::model::ProtocolVersion]> {
+            std::borrow::Cow::Owned(vec![rmcp::model::ProtocolVersion::V_2026_07_28])
+        }
+    }
+
+    #[test]
+    fn the_server_supports_the_protocol_versions_of_the_info_provider() {
+        let server = ServerBuilder::new().info(LatestOnlyInfo).build();
+
+        assert_eq!(
+            ServerHandler::supported_protocol_versions(&server).as_ref(),
+            [rmcp::model::ProtocolVersion::V_2026_07_28]
+        );
+    }
+
+    #[test]
+    fn the_default_info_provider_supports_every_known_version() {
+        let server = ServerBuilder::new()
+            .info(Implementation::new("test", "1.0.0"))
+            .build();
+
+        assert_eq!(
+            ServerHandler::supported_protocol_versions(&server).as_ref(),
+            rmcp::model::ProtocolVersion::KNOWN_VERSIONS
+        );
+    }
 
     /// Capabilities that advertise every provider-backed capability, with every subflag set.
     fn advertised_capabilities() -> ServerCapabilities {

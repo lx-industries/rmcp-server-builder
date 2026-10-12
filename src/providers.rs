@@ -4,15 +4,17 @@
 //! Blanket implementations ensure that any `ServerHandler` automatically implements
 //! all provider traits.
 
+use std::borrow::Cow;
+
 use rmcp::{
     handler::server::ServerHandler,
     model::{
         CallToolRequestParams, CallToolResponse, CancelTaskParams, CompleteRequestParams,
         CompleteResult, ErrorCode, ErrorData, GetPromptRequestParams, GetPromptResponse,
         GetTaskParams, GetTaskResult, ListPromptsResult, ListResourceTemplatesResult,
-        ListResourcesResult, ListToolsResult, PaginatedRequestParams, ReadResourceRequestParams,
-        ReadResourceResponse, ServerCapabilities, ServerConfig, SubscribeRequestParams,
-        UnsubscribeRequestParams, UpdateTaskParams,
+        ListResourcesResult, ListToolsResult, PaginatedRequestParams, ProtocolVersion,
+        ReadResourceRequestParams, ReadResourceResponse, ServerCapabilities, ServerConfig,
+        SubscribeRequestParams, UnsubscribeRequestParams, UpdateTaskParams,
     },
     service::{RequestContext, RoleServer},
 };
@@ -208,6 +210,15 @@ pub trait ServerInfoProvider: Send + Sync + 'static {
     /// Get the base capabilities (before provider-based adjustments).
     fn capabilities(&self) -> ServerCapabilities {
         self.get_info().capabilities.clone()
+    }
+
+    /// The protocol versions the composed server implements.
+    ///
+    /// The composed [`Server`](crate::Server) answers `server/discover` with this list,
+    /// and `rmcp` bounds `initialize` negotiation and per-request versions by it. The
+    /// default is every version `rmcp` knows.
+    fn supported_protocol_versions(&self) -> Cow<'static, [ProtocolVersion]> {
+        Cow::Borrowed(ProtocolVersion::KNOWN_VERSIONS)
     }
 }
 

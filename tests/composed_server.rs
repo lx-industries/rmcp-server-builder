@@ -8,14 +8,14 @@ use rmcp::{
         GetPromptResponse, GetPromptResult, GetTaskParams, Implementation, InputRequiredResult,
         ListPromptsResult, ListResourceTemplatesResult, ListResourcesResult, ListToolsResult,
         PaginatedRequestParams, ProtocolVersion, ReadResourceRequestParams, ReadResourceResponse,
-        ReadResourceResult, ResourceContents, ServerConfig, SubscribeRequestParams, Task,
-        TaskStatus, UnsubscribeRequestParams,
+        ReadResourceResult, RequestMetaObject, ResourceContents, ServerConfig,
+        SubscribeRequestParams, Task, TaskStatus, UnsubscribeRequestParams,
     },
     service::{RequestContext, RoleServer, ServiceError},
 };
 use rmcp_server_builder::{
-    PromptsProvider, ResourcesProvider, ServerBuilder, ServerCapabilities, SimpleInfo,
-    ToolsProvider,
+    PromptsProvider, ResourcesProvider, ServerBuilder, ServerCapabilities, ServerInfoProvider,
+    SimpleInfo, ToolsProvider,
 };
 
 const TOOL_TEXT: &str = "tool ran";
@@ -329,6 +329,63 @@ async fn a_server_handler_provider_passes_input_required_through() {
         panic!("expected an input-required response, got {response:?}");
     };
     assert_eq!(input_required.request_state.as_deref(), Some(REQUEST_STATE));
+
+    client.cancel().await.expect("cancel client");
+    server_task.await.expect("server task");
+}
+
+/// An info provider that implements only protocol version 2026-07-28.
+struct LatestOnlyInfo;
+
+impl ServerInfoProvider for LatestOnlyInfo {
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(ServerCapabilities::default())
+            .with_server_info(Implementation::new("test", "1.0.0"))
+    }
+
+    fn supported_protocol_versions(&self) -> std::borrow::Cow<'static, [ProtocolVersion]> {
+        std::borrow::Cow::Owned(vec![ProtocolVersion::V_2026_07_28])
+    }
+}
+
+#[tokio::test]
+async fn discover_answers_the_protocol_versions_of_the_info_provider() {
+    let (server_transport, client_transport) = tokio::io::duplex(4096);
+    let server = ServerBuilder::new().info(LatestOnlyInfo).build();
+    let server_task = tokio::spawn(async move {
+        let running = server.serve(server_transport).await.expect("serve server");
+        running.waiting().await.expect("server stops");
+    });
+
+    let client = client_configuration(ProtocolVersion::V_2026_07_28)
+        .serve_with_lifecycle(
+            client_transport,
+            ClientLifecycleMode::Discover {
+                preferred_versions: vec![ProtocolVersion::V_2026_07_28],
+            },
+        )
+        .await
+        .expect("discover server");
+
+    let discovered = client
+        .discover(RequestMetaObject::default())
+        .await
+        .expect("discover");
+
+    assert_eq!(
+        discovered.supported_versions,
+        vec![ProtocolVersion::V_2026_07_28]
+    );
+
+    // A non-discover request moves the server past its pre-lifecycle loop
+    // (`server/discover` alone never does; see `service/server.rs`), so
+    // `cancel` below closes an established connection instead of one still
+    // waiting on that loop's first non-discover request.
+    let list_tools_error = client.list_tools(None).await;
+    let Err(ServiceError::McpError(error)) = list_tools_error else {
+        panic!("expected an MCP error, got {list_tools_error:?}");
+    };
+    assert_eq!(error.code, ErrorCode::METHOD_NOT_FOUND);
 
     client.cancel().await.expect("cancel client");
     server_task.await.expect("server task");
