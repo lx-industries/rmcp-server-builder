@@ -36,8 +36,31 @@
 //!
 //! # Blanket Implementations
 //!
-//! Any type implementing `ServerHandler` automatically implements all provider traits,
-//! so existing servers can be used as providers without modification.
+//! Any type implementing `ServerHandler` automatically implements every provider trait
+//! except [`SubscriptionsProvider`], so existing servers can be used as providers without
+//! modification. [`SubscriptionsProvider`] has no blanket implementation, because
+//! `ServerHandler::listen` takes a `SubscriptionContext` that only `rmcp` builds.
+//!
+//! # Merging Providers
+//!
+//! The builder takes one provider per capability. Compose several providers of one
+//! capability with one of the six merging types: [`MergedToolsProvider`],
+//! [`MergedPromptsProvider`], [`MergedResourcesProvider`], [`MergedCompletionProvider`],
+//! [`MergedLoggingProvider`], [`MergedSubscriptionsProvider`].
+//!
+//! A merged provider re-lists every composed provider on each `list_*` call, so a list
+//! change is visible on the next call. The composed server advertises `listChanged` only
+//! when every provider of a [`MergedSubscriptionsProvider`] supports it: one provider's
+//! flag would promise notifications the others never send.
+//!
+//! | Capability | Routes by |
+//! |---|---|
+//! | Tools, prompts | exact name |
+//! | Resources | exact URI, then resource template, then registered scheme owner, then inferred URI scheme |
+//! | Completions | the `ref` the request names (a prompt or a resource template) |
+//! | Logging | fans out: every composed provider receives the call |
+//! | `tasks/*` | the provider that created the task |
+//! | Subscriptions | a URI to its one accepting provider; list-changed flags to every provider |
 //!
 //! # Capability Auto-Detection
 //!
@@ -53,7 +76,7 @@ mod subscriptions;
 pub use builder::{ServerBuilder, SimpleInfo};
 pub use merge::{
     MergedCompletionProvider, MergedLoggingProvider, MergedPromptsProvider,
-    MergedResourcesProvider, MergedToolsProvider,
+    MergedResourcesProvider, MergedSubscriptionsProvider, MergedToolsProvider,
 };
 pub use providers::{
     CompletionProvider, LoggingProvider, PromptsProvider, ResourcesProvider, ServerInfoProvider,

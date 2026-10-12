@@ -6,10 +6,12 @@ mod listing;
 mod logging;
 mod prompts;
 mod resources;
+mod subscriptions;
 mod tools;
 
 pub use completion::MergedCompletionProvider;
 pub use logging::MergedLoggingProvider;
 pub use prompts::MergedPromptsProvider;
 pub use resources::MergedResourcesProvider;
+pub use subscriptions::MergedSubscriptionsProvider;
 pub use tools::MergedToolsProvider;

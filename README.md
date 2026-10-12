@@ -47,9 +47,9 @@ rmcp = { version = "3.5.1", features = ["server"] }
 
 A server sometimes needs more than one provider of the same capability, for example
 tools from two different backends. [`ServerBuilder`] takes one provider per capability,
-so compose the several providers into one first, with one of the five merging types:
+so compose the several providers into one first, with one of the six merging types:
 [`MergedToolsProvider`], [`MergedPromptsProvider`], [`MergedResourcesProvider`],
-[`MergedCompletionProvider`], [`MergedLoggingProvider`].
+[`MergedCompletionProvider`], [`MergedLoggingProvider`], [`MergedSubscriptionsProvider`].
 
 ```rust,ignore
 use rmcp_server_builder::{MergedResourcesProvider, MergedToolsProvider, ServerBuilder};
@@ -84,10 +84,10 @@ Three rules hold across every merging type:
 - **Cursor composition.** A merged provider's own pagination cursor wraps which
   composed provider listed a page and that provider's own cursor, so a client's
   pagination loop sees one list, drained provider by provider.
-- **`listChanged` propagation.** A merged provider caches nothing between calls: it
-  re-lists every composed provider on each `list_*` call, so a composed provider's own
-  list change is visible on the merged provider's next call, with no separate
-  forwarding step.
+- **`listChanged` propagation.** A merged provider re-lists every composed provider on
+  each `list_*` call, so a list change is visible on the next call. The composed server
+  advertises `listChanged` only when every provider of a `MergedSubscriptionsProvider`
+  supports it: one provider's flag would promise notifications the others never send.
 
 Each merging type routes a call to the composed provider that owns it:
 
@@ -97,6 +97,7 @@ Each merging type routes a call to the composed provider that owns it:
 | Resources | exact URI, then resource template, then registered scheme owner, then inferred URI scheme |
 | Completions | the `ref` the request names (a prompt or a resource template) |
 | Logging | fans out: every composed provider receives the call |
+| Subscriptions | a URI to its one accepting provider; list-changed flags to every provider |
 | `tasks/*` | the provider that created the task |
 
 ## Subscriptions

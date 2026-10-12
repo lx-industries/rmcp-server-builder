@@ -105,7 +105,7 @@ pub struct SubscriptionPart {
 }
 
 impl SubscriptionPart {
-    /// The part of the whole stream's acknowledged filter.
+    /// A part that covers the whole stream: its acknowledged filter and its request context.
     pub(crate) fn from_context(context: &SubscriptionContext) -> Self {
         Self {
             sink: SubscriptionPartSink {
@@ -118,10 +118,6 @@ impl SubscriptionPart {
 
     /// A part of this part, restricted to `accepted`, with its own cancellation token: a
     /// child of this part's token.
-    #[expect(
-        dead_code,
-        reason = "a stream split across several providers narrows one part per provider"
-    )]
     pub(crate) fn narrowed(&self, accepted: SubscriptionFilter) -> Self {
         let mut context = self.context.clone();
         context.ct = self.context.ct.child_token();
