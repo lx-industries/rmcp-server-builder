@@ -1,3 +1,20 @@
+## [0.4.0](https://gitlab.com/lx-industries/rmcp-server-builder/compare/v0.3.0...v0.4.0) (2026-10-12)
+
+
+### ⚠ BREAKING CHANGES
+
+* Server and ServerBuilder take a seventh type parameter, the subscriptions
+provider, between the logging and the info parameters. Migration: add Unset (or the provider
+type) in that position wherever the type is named.
+
+### Features
+
+* add the subscriptions provider slot to the composed server ([28d0410](https://gitlab.com/lx-industries/rmcp-server-builder/commit/28d0410ce6c2509bf7f7c2d654770d8fb4e31ff2))
+* **merge:** add MergedSubscriptionsProvider ([08a191c](https://gitlab.com/lx-industries/rmcp-server-builder/commit/08a191c5195cb1c0461e24639d1f093bf5197085))
+* **merge:** fail call_tool only for a duplicated tool name ([f81cfd5](https://gitlab.com/lx-industries/rmcp-server-builder/commit/f81cfd581e2cff1c62d739cede2af37c13461b05))
+* **merge:** route a resource URI to a registered scheme owner ([169fc05](https://gitlab.com/lx-industries/rmcp-server-builder/commit/169fc0525c7b791e93f69752f961584798f3943a))
+* **server:** forward supported_protocol_versions from the info provider ([894eba5](https://gitlab.com/lx-industries/rmcp-server-builder/commit/894eba52f2df287865cf1567b8728a97621368a0))
+
 ## [0.3.0](https://gitlab.com/lx-industries/rmcp-server-builder/compare/v0.2.0...v0.3.0) (2026-10-08)
 
 
