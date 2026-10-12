@@ -31,6 +31,7 @@
 //! - [`ResourcesProvider`] - `list_resources`, `list_resource_templates`, `read_resource`, `subscribe`, `unsubscribe`
 //! - [`CompletionProvider`] - `complete`
 //! - [`LoggingProvider`] - `set_level`
+//! - [`SubscriptionsProvider`] - `subscriptions/listen` (protocol 2026-07-28)
 //! - [`ServerInfoProvider`] - `get_info` (required)
 //!
 //! # Blanket Implementations
@@ -47,6 +48,7 @@ mod builder;
 mod merge;
 mod providers;
 mod server;
+mod subscriptions;
 
 pub use builder::{ServerBuilder, SimpleInfo};
 pub use merge::{
@@ -58,14 +60,17 @@ pub use providers::{
     ToolsProvider,
 };
 pub use server::{Server, Unset};
+pub use subscriptions::{
+    ListChangedSupport, SubscriptionPart, SubscriptionPartSink, SubscriptionsProvider,
+};
 
 // Re-export commonly used rmcp types for convenience
 pub use rmcp::handler::server::ServerHandler;
 pub use rmcp::model::{Implementation, ServerCapabilities};
 
-impl<T, P, R, C, L, I> Server<T, P, R, C, L, I> {
+impl<T, P, R, C, L, S, I> Server<T, P, R, C, L, S, I> {
     /// Create a new server builder.
-    pub fn builder() -> ServerBuilder<Unset, Unset, Unset, Unset, Unset, Unset> {
+    pub fn builder() -> ServerBuilder<Unset, Unset, Unset, Unset, Unset, Unset, Unset> {
         ServerBuilder::new()
     }
 }
@@ -143,7 +148,7 @@ mod tests {
 
     #[test]
     fn test_server_builder_static_method() {
-        let _server = Server::<Unset, Unset, Unset, Unset, Unset, Unset>::builder()
+        let _server = Server::<Unset, Unset, Unset, Unset, Unset, Unset, Unset>::builder()
             .info(Implementation::new("test", "1.0.0"))
             .build();
     }

@@ -14,4 +14,4 @@ rmcp = { version = "3.5.1", features = ["server"] }
 
 [dev-dependencies]
 rmcp = { version = "3.5.1", features = ["client", "server"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-util"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-util", "sync", "time"] }

@@ -99,6 +99,64 @@ Each merging type routes a call to the composed provider that owns it:
 | Logging | fans out: every composed provider receives the call |
 | `tasks/*` | the provider that created the task |
 
+## Subscriptions
+
+Protocol 2026-07-28 delivers change notifications on one `subscriptions/listen` stream.
+Implement [`SubscriptionsProvider`] and set it with `ServerBuilder::subscriptions`:
+
+```rust,ignore
+use rmcp_server_builder::{
+    ListChangedSupport, ServerBuilder, SubscriptionPart, SubscriptionsProvider,
+};
+
+struct Watcher;
+
+impl SubscriptionsProvider for Watcher {
+    fn support(&self) -> ListChangedSupport {
+        ListChangedSupport { tools: true, prompts: false, resources: false }
+    }
+
+    fn accepts_resource(&self, uri: &str) -> bool {
+        uri.starts_with("file://")
+    }
+
+    async fn listen(&self, part: SubscriptionPart) -> Result<(), rmcp::ErrorData> {
+        part.sink().notify_tool_list_changed().await.ok();
+        part.cancelled().await;
+        Ok(())
+    }
+}
+
+let server = ServerBuilder::new()
+    .info(info)
+    .tools(tools)
+    .resources(resources)
+    .subscriptions(Watcher)
+    .build();
+```
+
+The composed server derives the acknowledgment and the `listChanged` flags from the provider:
+
+- **Acknowledgment.** The server acknowledges each requested list-changed flag that
+  `support()` carries, and each requested URI that `accepts_resource` accepts. `rmcp` then
+  removes each flag and each resource subscription that the server capabilities do not
+  advertise.
+- **`listChanged`.** With a subscriptions provider set, `listChanged` on the tools, prompts
+  and resources capabilities comes from `support()`. A provider with a static list supports
+  the flag and never sends the notification.
+- **`resources.subscribe`.** The flag stays with the info provider. Advertise it there, or
+  `rmcp` drops every requested resource subscription.
+- **Part sink.** `SubscriptionPart::sink` refuses a notification outside the part's accepted
+  filter with `SubscriptionSendError::NotificationNotAccepted`.
+
+Without a subscriptions provider, `subscriptions/listen` is method-not-found. No blanket
+implementation of `SubscriptionsProvider` exists for `ServerHandler`: `ServerHandler::listen`
+takes a `SubscriptionContext`, which only `rmcp` builds.
+
+`subscriptions/listen` exists on protocol 2026-07-28 only. The composed server implements the
+protocol versions that `ServerInfoProvider::supported_protocol_versions` returns; the default
+is every version `rmcp` knows.
+
 ## Upgrading from 0.1
 
 0.2 builds on `rmcp` 3.x; 0.1 builds on `rmcp` 1.x. Four signatures change:

@@ -10,9 +10,9 @@ use rmcp::{
         GetTaskParams, GetTaskResult, ListPromptsResult, ListResourceTemplatesResult,
         ListResourcesResult, ListToolsResult, PaginatedRequestParams, ProtocolVersion,
         ReadResourceRequestParams, ReadResourceResponse, ServerCapabilities, ServerConfig,
-        SubscribeRequestParams, UnsubscribeRequestParams, UpdateTaskParams,
+        SubscribeRequestParams, SubscriptionFilter, UnsubscribeRequestParams, UpdateTaskParams,
     },
-    service::{RequestContext, RoleServer},
+    service::{RequestContext, RoleServer, SubscriptionContext},
 };
 
 #[expect(
@@ -24,6 +24,9 @@ use rmcp::model::SetLevelRequestParams;
 use crate::providers::{
     CompletionProvider, LoggingProvider, PromptsProvider, ResourcesProvider, ServerInfoProvider,
     ToolsProvider,
+};
+use crate::subscriptions::{
+    ListChangedSupport, SubscriptionPart, SubscriptionsProvider, accepted_filter,
 };
 
 /// Marker for an unset provider.
@@ -41,20 +44,23 @@ pub struct Unset;
 /// - `R`: Resources provider (or `Unset`)
 /// - `C`: Completion provider (or `Unset`)
 /// - `L`: Logging provider (or `Unset`)
+/// - `S`: Subscriptions provider (or `Unset`)
 /// - `I`: Server info provider (required)
 #[derive(Clone)]
-pub struct Server<T, P, R, C, L, I> {
+pub struct Server<T, P, R, C, L, S, I> {
     pub(crate) tools: Option<T>,
     pub(crate) prompts: Option<P>,
     pub(crate) resources: Option<R>,
     pub(crate) completion: Option<C>,
     pub(crate) logging: Option<L>,
+    pub(crate) subscriptions: Option<S>,
     pub(crate) info: I,
     pub(crate) instructions: Option<String>,
 }
 
-impl<T, P, R, C, L, I> Server<T, P, R, C, L, I>
+impl<T, P, R, C, L, S, I> Server<T, P, R, C, L, S, I>
 where
+    S: SubscriptionsProvider,
     I: ServerInfoProvider,
 {
     /// Get the capabilities this server advertises.
@@ -64,6 +70,11 @@ where
     /// subflags the info provider configures (`listChanged`, `subscribe`); when the info provider
     /// configures none, the capability is the default. Every other field comes from the info
     /// provider unchanged.
+    ///
+    /// With a subscriptions provider set, `listChanged` on tools, prompts and resources comes
+    /// from the provider's [`support`](SubscriptionsProvider::support) instead.
+    /// `resources.subscribe` stays with the info provider: `rmcp` drops requested resource
+    /// subscriptions from a `subscriptions/listen` acknowledgment unless it is advertised.
     fn combined_capabilities(&self) -> ServerCapabilities {
         let mut caps = self.info.capabilities();
 
@@ -88,6 +99,19 @@ where
             .as_ref()
             .map(|_| caps.logging.take().unwrap_or_default());
 
+        if let Some(provider) = &self.subscriptions {
+            let support = provider.support();
+            if let Some(tools) = caps.tools.as_mut() {
+                tools.list_changed = support.tools.then_some(true);
+            }
+            if let Some(prompts) = caps.prompts.as_mut() {
+                prompts.list_changed = support.prompts.then_some(true);
+            }
+            if let Some(resources) = caps.resources.as_mut() {
+                resources.list_changed = support.resources.then_some(true);
+            }
+        }
+
         caps
     }
 }
@@ -96,13 +120,14 @@ where
 // ServerHandler implementation
 // =============================================================================
 
-impl<T, P, R, C, L, I> ServerHandler for Server<T, P, R, C, L, I>
+impl<T, P, R, C, L, S, I> ServerHandler for Server<T, P, R, C, L, S, I>
 where
     T: ToolsProvider,
     P: PromptsProvider,
     R: ResourcesProvider,
     C: CompletionProvider,
     L: LoggingProvider,
+    S: SubscriptionsProvider,
     I: ServerInfoProvider,
 {
     fn get_info(&self) -> ServerConfig {
@@ -359,6 +384,39 @@ where
             )),
         }
     }
+
+    /// Acknowledges, with a subscriptions provider set, each requested list-changed flag
+    /// the provider supports and each requested URI it accepts. With none set, answers
+    /// `None`: `subscriptions/listen` is method-not-found.
+    fn accepted_subscription_filter(
+        &self,
+        requested: &SubscriptionFilter,
+    ) -> Option<SubscriptionFilter> {
+        self.subscriptions.as_ref().map(|provider| {
+            accepted_filter(
+                provider.support(),
+                |uri| provider.accepts_resource(uri),
+                requested,
+            )
+        })
+    }
+
+    /// Runs the subscriptions provider on the whole acknowledged stream. The
+    /// `SubscriptionContext` lives until the provider returns: dropping it closes every
+    /// sink of the stream.
+    async fn listen(&self, context: SubscriptionContext) -> Result<(), ErrorData> {
+        match &self.subscriptions {
+            Some(provider) => {
+                provider
+                    .listen(SubscriptionPart::from_context(&context))
+                    .await
+            }
+            None => {
+                context.cancelled().await;
+                Ok(())
+            }
+        }
+    }
 }
 
 // =============================================================================
@@ -547,15 +605,35 @@ impl LoggingProvider for Unset {
     }
 }
 
+impl SubscriptionsProvider for Unset {
+    fn support(&self) -> ListChangedSupport {
+        ListChangedSupport::default()
+    }
+
+    fn accepts_resource(&self, _uri: &str) -> bool {
+        false
+    }
+
+    async fn listen(&self, part: SubscriptionPart) -> Result<(), ErrorData> {
+        part.cancelled().await;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::borrow::Cow;
+
     use rmcp::model::{
-        Implementation, JsonObject, PromptsCapability, ResourcesCapability, ServerCapabilities,
-        ServerConfig, ToolsCapability,
+        ErrorData, Implementation, JsonObject, PromptsCapability, ProtocolVersion,
+        ResourcesCapability, ServerCapabilities, ServerConfig, ToolsCapability,
     };
 
     use super::{ServerHandler, Unset};
-    use crate::{MergedToolsProvider, ServerBuilder, SimpleInfo};
+    use crate::{
+        ListChangedSupport, MergedToolsProvider, ServerBuilder, SimpleInfo, SubscriptionPart,
+        SubscriptionsProvider,
+    };
 
     /// An info provider that implements only protocol version 2026-07-28.
     struct LatestOnlyInfo;
@@ -566,10 +644,8 @@ mod tests {
                 .with_server_info(Implementation::new("test", "1.0.0"))
         }
 
-        fn supported_protocol_versions(
-            &self,
-        ) -> std::borrow::Cow<'static, [rmcp::model::ProtocolVersion]> {
-            std::borrow::Cow::Owned(vec![rmcp::model::ProtocolVersion::V_2026_07_28])
+        fn supported_protocol_versions(&self) -> Cow<'static, [ProtocolVersion]> {
+            Cow::Owned(vec![ProtocolVersion::V_2026_07_28])
         }
     }
 
@@ -579,7 +655,7 @@ mod tests {
 
         assert_eq!(
             ServerHandler::supported_protocol_versions(&server).as_ref(),
-            [rmcp::model::ProtocolVersion::V_2026_07_28]
+            [ProtocolVersion::V_2026_07_28]
         );
     }
 
@@ -591,7 +667,7 @@ mod tests {
 
         assert_eq!(
             ServerHandler::supported_protocol_versions(&server).as_ref(),
-            rmcp::model::ProtocolVersion::KNOWN_VERSIONS
+            ProtocolVersion::KNOWN_VERSIONS
         );
     }
 
@@ -683,5 +759,49 @@ mod tests {
         let capabilities = server.get_info().capabilities;
 
         assert_eq!(capabilities.tools, advertised_capabilities().tools);
+    }
+
+    /// A subscriptions provider that supports the list-changed flags it holds, accepts no
+    /// resource, and waits for cancellation.
+    struct StaticSupport(ListChangedSupport);
+
+    impl SubscriptionsProvider for StaticSupport {
+        fn support(&self) -> ListChangedSupport {
+            self.0
+        }
+
+        fn accepts_resource(&self, _uri: &str) -> bool {
+            false
+        }
+
+        async fn listen(&self, part: SubscriptionPart) -> Result<(), ErrorData> {
+            part.cancelled().await;
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_subscriptions_provider_sets_list_changed_from_its_support() {
+        let server = ServerBuilder::new()
+            .info(info(advertised_capabilities()))
+            .tools(Unset)
+            .prompts(Unset)
+            .resources(Unset)
+            .subscriptions(StaticSupport(ListChangedSupport {
+                tools: true,
+                prompts: false,
+                resources: true,
+            }))
+            .build();
+
+        let capabilities = server.get_info().capabilities;
+
+        let tools = capabilities.tools.expect("tools capability");
+        let prompts = capabilities.prompts.expect("prompts capability");
+        let resources = capabilities.resources.expect("resources capability");
+        assert_eq!(tools.list_changed, Some(true));
+        assert_eq!(prompts.list_changed, None);
+        assert_eq!(resources.list_changed, Some(true));
+        assert_eq!(resources.subscribe, Some(true));
     }
 }

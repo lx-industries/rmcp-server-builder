@@ -7,6 +7,7 @@ use crate::providers::{
     ToolsProvider,
 };
 use crate::server::{Server, Unset};
+use crate::subscriptions::SubscriptionsProvider;
 
 /// Builder for constructing a composed MCP server.
 ///
@@ -22,23 +23,24 @@ use crate::server::{Server, Unset};
 ///     .prompts(my_prompts_provider)
 ///     .build();
 /// ```
-pub struct ServerBuilder<T, P, R, C, L, I> {
+pub struct ServerBuilder<T, P, R, C, L, S, I> {
     tools: Option<T>,
     prompts: Option<P>,
     resources: Option<R>,
     completion: Option<C>,
     logging: Option<L>,
+    subscriptions: Option<S>,
     info: Option<I>,
     instructions: Option<String>,
 }
 
-impl Default for ServerBuilder<Unset, Unset, Unset, Unset, Unset, Unset> {
+impl Default for ServerBuilder<Unset, Unset, Unset, Unset, Unset, Unset, Unset> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl ServerBuilder<Unset, Unset, Unset, Unset, Unset, Unset> {
+impl ServerBuilder<Unset, Unset, Unset, Unset, Unset, Unset, Unset> {
     /// Create a new server builder with no providers set.
     pub fn new() -> Self {
         Self {
@@ -47,21 +49,26 @@ impl ServerBuilder<Unset, Unset, Unset, Unset, Unset, Unset> {
             resources: None,
             completion: None,
             logging: None,
+            subscriptions: None,
             info: None,
             instructions: None,
         }
     }
 }
 
-impl<T, P, R, C, L, I> ServerBuilder<T, P, R, C, L, I> {
+impl<T, P, R, C, L, S, I> ServerBuilder<T, P, R, C, L, S, I> {
     /// Set the tools provider.
-    pub fn tools<NewT: ToolsProvider>(self, provider: NewT) -> ServerBuilder<NewT, P, R, C, L, I> {
+    pub fn tools<NewT: ToolsProvider>(
+        self,
+        provider: NewT,
+    ) -> ServerBuilder<NewT, P, R, C, L, S, I> {
         ServerBuilder {
             tools: Some(provider),
             prompts: self.prompts,
             resources: self.resources,
             completion: self.completion,
             logging: self.logging,
+            subscriptions: self.subscriptions,
             info: self.info,
             instructions: self.instructions,
         }
@@ -71,13 +78,14 @@ impl<T, P, R, C, L, I> ServerBuilder<T, P, R, C, L, I> {
     pub fn prompts<NewP: PromptsProvider>(
         self,
         provider: NewP,
-    ) -> ServerBuilder<T, NewP, R, C, L, I> {
+    ) -> ServerBuilder<T, NewP, R, C, L, S, I> {
         ServerBuilder {
             tools: self.tools,
             prompts: Some(provider),
             resources: self.resources,
             completion: self.completion,
             logging: self.logging,
+            subscriptions: self.subscriptions,
             info: self.info,
             instructions: self.instructions,
         }
@@ -87,13 +95,14 @@ impl<T, P, R, C, L, I> ServerBuilder<T, P, R, C, L, I> {
     pub fn resources<NewR: ResourcesProvider>(
         self,
         provider: NewR,
-    ) -> ServerBuilder<T, P, NewR, C, L, I> {
+    ) -> ServerBuilder<T, P, NewR, C, L, S, I> {
         ServerBuilder {
             tools: self.tools,
             prompts: self.prompts,
             resources: Some(provider),
             completion: self.completion,
             logging: self.logging,
+            subscriptions: self.subscriptions,
             info: self.info,
             instructions: self.instructions,
         }
@@ -103,13 +112,14 @@ impl<T, P, R, C, L, I> ServerBuilder<T, P, R, C, L, I> {
     pub fn completion<NewC: CompletionProvider>(
         self,
         provider: NewC,
-    ) -> ServerBuilder<T, P, R, NewC, L, I> {
+    ) -> ServerBuilder<T, P, R, NewC, L, S, I> {
         ServerBuilder {
             tools: self.tools,
             prompts: self.prompts,
             resources: self.resources,
             completion: Some(provider),
             logging: self.logging,
+            subscriptions: self.subscriptions,
             info: self.info,
             instructions: self.instructions,
         }
@@ -119,13 +129,31 @@ impl<T, P, R, C, L, I> ServerBuilder<T, P, R, C, L, I> {
     pub fn logging<NewL: LoggingProvider>(
         self,
         provider: NewL,
-    ) -> ServerBuilder<T, P, R, C, NewL, I> {
+    ) -> ServerBuilder<T, P, R, C, NewL, S, I> {
         ServerBuilder {
             tools: self.tools,
             prompts: self.prompts,
             resources: self.resources,
             completion: self.completion,
             logging: Some(provider),
+            subscriptions: self.subscriptions,
+            info: self.info,
+            instructions: self.instructions,
+        }
+    }
+
+    /// Set the subscriptions provider.
+    pub fn subscriptions<NewS: SubscriptionsProvider>(
+        self,
+        provider: NewS,
+    ) -> ServerBuilder<T, P, R, C, L, NewS, I> {
+        ServerBuilder {
+            tools: self.tools,
+            prompts: self.prompts,
+            resources: self.resources,
+            completion: self.completion,
+            logging: self.logging,
+            subscriptions: Some(provider),
             info: self.info,
             instructions: self.instructions,
         }
@@ -135,13 +163,14 @@ impl<T, P, R, C, L, I> ServerBuilder<T, P, R, C, L, I> {
     pub fn info<NewI: ServerInfoProvider>(
         self,
         provider: NewI,
-    ) -> ServerBuilder<T, P, R, C, L, NewI> {
+    ) -> ServerBuilder<T, P, R, C, L, S, NewI> {
         ServerBuilder {
             tools: self.tools,
             prompts: self.prompts,
             resources: self.resources,
             completion: self.completion,
             logging: self.logging,
+            subscriptions: self.subscriptions,
             info: Some(provider),
             instructions: self.instructions,
         }
@@ -155,7 +184,7 @@ impl<T, P, R, C, L, I> ServerBuilder<T, P, R, C, L, I> {
 }
 
 // Build method - requires I to be set
-impl<T, P, R, C, L, I> ServerBuilder<T, P, R, C, L, I>
+impl<T, P, R, C, L, S, I> ServerBuilder<T, P, R, C, L, S, I>
 where
     I: ServerInfoProvider,
 {
@@ -163,13 +192,14 @@ where
     ///
     /// This will use `Unset` for any providers that weren't explicitly set,
     /// which will return "method not found" errors for those capabilities.
-    pub fn build(self) -> Server<T, P, R, C, L, I> {
+    pub fn build(self) -> Server<T, P, R, C, L, S, I> {
         Server {
             tools: self.tools,
             prompts: self.prompts,
             resources: self.resources,
             completion: self.completion,
             logging: self.logging,
+            subscriptions: self.subscriptions,
             info: self.info.expect("info provider is required"),
             instructions: self.instructions,
         }
