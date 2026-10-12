@@ -50,8 +50,8 @@ impl<T: SubscriptionsProvider> DynSubscriptionsProvider for T {
 ///   owners leave it out of the acknowledgment.
 /// * `listen` runs every provider's part, also a part with an empty filter: a provider
 ///   MAY send custom notifications through the peer. The first part to end ends the
-///   stream with its outcome; the other parts are cancelled and awaited first. A part
-///   that ignores its cancellation holds the stream open.
+///   stream with its outcome; the other parts are cancelled and polled concurrently
+///   until each ends. A part that ignores its cancellation holds the stream open.
 pub struct MergedSubscriptionsProvider {
     providers: Vec<Box<dyn DynSubscriptionsProvider>>,
 }
@@ -81,11 +81,11 @@ impl Default for MergedSubscriptionsProvider {
 
 impl SubscriptionsProvider for MergedSubscriptionsProvider {
     fn support(&self) -> ListChangedSupport {
-        let mut supports = self.providers.iter().map(|provider| provider.support());
-        let Some(first) = supports.next() else {
-            return ListChangedSupport::default();
-        };
-        supports.fold(first, ListChangedSupport::intersection)
+        self.providers
+            .iter()
+            .map(|provider| provider.support())
+            .reduce(ListChangedSupport::intersection)
+            .unwrap_or_default()
     }
 
     fn accepts_resource(&self, uri: &str) -> bool {
@@ -101,40 +101,28 @@ impl SubscriptionsProvider for MergedSubscriptionsProvider {
             part.cancelled().await;
             return Ok(());
         }
-        let parts: Vec<SubscriptionPart> = self
-            .providers
-            .iter()
-            .map(|provider| {
-                part.narrowed(accepted_filter(
-                    provider.support(),
-                    |uri| provider.accepts_resource(uri),
-                    part.accepted(),
-                ))
-            })
-            .collect();
-        let part_cancellations: Vec<_> = parts
-            .iter()
-            .map(|part| part.request_context().ct.clone())
-            .collect();
+        // One token for every provider part: cancelling it cancels each part and leaves
+        // the request's own token untouched.
+        let group = part.narrowed(part.accepted().clone());
         let mut listens: Vec<_> = self
             .providers
             .iter()
-            .zip(parts)
-            .map(|(provider, part)| provider.listen(part))
+            .map(|provider| {
+                provider.listen(group.narrowed(accepted_filter(
+                    provider.support(),
+                    |uri| provider.accepts_resource(uri),
+                    group.accepted(),
+                )))
+            })
             .collect();
 
         let (ended_index, outcome) = first_to_end(&mut listens).await;
 
-        for cancellation in &part_cancellations {
-            cancellation.cancel();
-        }
-        for (index, listen) in listens.into_iter().enumerate() {
-            if index != ended_index {
-                // The first part's end decides the stream's outcome; a cancelled
-                // part's own outcome is not reported.
-                let _ = listen.await;
-            }
-        }
+        group.request_context().ct.cancel();
+        // The first part's end decides the stream's outcome; a cancelled part's own
+        // outcome is not reported.
+        drop(listens.swap_remove(ended_index));
+        all_end(listens).await;
         outcome
     }
 }
@@ -151,6 +139,28 @@ async fn first_to_end<F: Future + Unpin>(futures: &mut [F]) -> (usize, F::Output
         Poll::Pending
     })
     .await
+}
+
+/// Polls every future concurrently until each one completes; drops each output. A
+/// future's completion can depend on another future being polled, so none waits on
+/// another's turn.
+async fn all_end<F: Future + Unpin>(futures: Vec<F>) {
+    let mut pending: Vec<Option<F>> = futures.into_iter().map(Some).collect();
+    std::future::poll_fn(|waker_context| {
+        for slot in &mut pending {
+            if let Some(future) = slot
+                && Pin::new(future).poll(waker_context).is_ready()
+            {
+                *slot = None;
+            }
+        }
+        if pending.iter().all(Option::is_none) {
+            Poll::Ready(())
+        } else {
+            Poll::Pending
+        }
+    })
+    .await;
 }
 
 #[cfg(test)]

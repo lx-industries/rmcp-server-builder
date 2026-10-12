@@ -20,6 +20,7 @@ use rmcp::{
         RequestContext, RoleServer, SubscriptionContext, SubscriptionSendError, SubscriptionSink,
     },
 };
+use tokio_util::sync::CancellationToken;
 
 /// The list-changed notifications a [`SubscriptionsProvider`] supports.
 ///
@@ -77,13 +78,9 @@ pub(crate) fn accepted_filter(
     accepts_resource: impl Fn(&str) -> bool,
     requested: &SubscriptionFilter,
 ) -> SubscriptionFilter {
-    let mut accepted = SubscriptionFilter::new();
-    accepted.tools_list_changed =
-        (requested.tools_list_changed == Some(true) && support.tools).then_some(true);
-    accepted.prompts_list_changed =
-        (requested.prompts_list_changed == Some(true) && support.prompts).then_some(true);
-    accepted.resources_list_changed =
-        (requested.resources_list_changed == Some(true) && support.resources).then_some(true);
+    // The URIs come from one filter pass: `SubscriptionFilter::intersection` would match
+    // each requested URI against the accepted list, quadratic in the request size.
+    let mut accepted = requested.intersection(&list_changed_filter(support));
     accepted.resource_subscriptions = requested
         .resource_subscriptions
         .as_ref()
@@ -95,6 +92,15 @@ pub(crate) fn accepted_filter(
         })
         .filter(|uris| !uris.is_empty());
     accepted
+}
+
+/// The list-changed flags `support` carries, with no resource subscription.
+fn list_changed_filter(support: ListChangedSupport) -> SubscriptionFilter {
+    let mut filter = SubscriptionFilter::new();
+    filter.tools_list_changed = support.tools.then_some(true);
+    filter.prompts_list_changed = support.prompts.then_some(true);
+    filter.resources_list_changed = support.resources.then_some(true);
+    filter
 }
 
 /// One provider's part of a `subscriptions/listen` stream.
@@ -111,6 +117,7 @@ impl SubscriptionPart {
             sink: SubscriptionPartSink {
                 stream_sink: context.sink().clone(),
                 accepted: Arc::new(context.accepted().clone()),
+                cancellation: context.request_context().ct.clone(),
             },
             context: context.request_context().clone(),
         }
@@ -125,6 +132,7 @@ impl SubscriptionPart {
             sink: SubscriptionPartSink {
                 stream_sink: self.sink.stream_sink.clone(),
                 accepted: Arc::new(accepted),
+                cancellation: context.ct.clone(),
             },
             context,
         }
@@ -132,7 +140,7 @@ impl SubscriptionPart {
 
     /// The notifications this part may send.
     pub fn accepted(&self) -> &SubscriptionFilter {
-        self.sink.accepted()
+        &self.sink.accepted
     }
 
     /// The sink this part sends through; it refuses a notification outside
@@ -159,23 +167,23 @@ impl SubscriptionPart {
 /// It refuses a notification outside its part's accepted filter, then sends through the
 /// stream's `rmcp` sink, which adds the subscription id. The `rmcp` client cancels a
 /// stream on a notification outside the acknowledged filter; the part check also stops
-/// a part from sending a notification another part owns.
+/// a part from sending a notification another part owns. Once its part is cancelled, the
+/// sink refuses every notification: the stream's end is decided.
 #[derive(Clone, Debug)]
 pub struct SubscriptionPartSink {
     stream_sink: SubscriptionSink,
     accepted: Arc<SubscriptionFilter>,
+    /// The part's cancellation token.
+    cancellation: CancellationToken,
 }
 
 impl SubscriptionPartSink {
-    /// The notifications this sink sends.
-    pub fn accepted(&self) -> &SubscriptionFilter {
-        self.accepted.as_ref()
-    }
-
-    /// Sends `notification` when this part's filter accepts it.
+    /// Sends `notification` when this part's filter accepts it and the part is not cancelled.
     ///
     /// # Errors
     ///
+    /// [`SubscriptionSendError::SubscriptionClosed`] once this part is cancelled, also for
+    /// a send still pending when the cancellation arrives.
     /// [`SubscriptionSendError::NotificationNotAccepted`] for a list-changed or
     /// resource-updated notification outside this part's filter; otherwise every error
     /// of `rmcp`'s `SubscriptionSink::send`.
@@ -183,10 +191,16 @@ impl SubscriptionPartSink {
         &self,
         notification: ServerNotification,
     ) -> Result<(), SubscriptionSendError> {
+        if self.cancellation.is_cancelled() {
+            return Err(SubscriptionSendError::SubscriptionClosed);
+        }
         if let Some(method) = refused_method(&self.accepted, &notification) {
             return Err(SubscriptionSendError::NotificationNotAccepted(method));
         }
-        self.stream_sink.send(notification).await
+        self.cancellation
+            .run_until_cancelled(self.stream_sink.send(notification))
+            .await
+            .unwrap_or(Err(SubscriptionSendError::SubscriptionClosed))
     }
 
     /// Sends `notifications/tools/list_changed`. See [`Self::send`].
@@ -290,6 +304,28 @@ mod tests {
         assert_eq!(
             accepted.resource_subscriptions,
             Some(vec!["a://1".to_owned()])
+        );
+    }
+
+    #[test]
+    fn the_acknowledgment_keeps_accepted_uris_in_requested_order() {
+        let requested = SubscriptionFilter::builder()
+            .resource_subscriptions(["a://3", "b://1", "a://1", "a://2"])
+            .build();
+
+        let accepted = accepted_filter(
+            ListChangedSupport::default(),
+            |uri| uri.starts_with("a://"),
+            &requested,
+        );
+
+        assert_eq!(
+            accepted.resource_subscriptions,
+            Some(vec![
+                "a://3".to_owned(),
+                "a://1".to_owned(),
+                "a://2".to_owned()
+            ])
         );
     }
 

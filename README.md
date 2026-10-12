@@ -148,7 +148,9 @@ The composed server derives the acknowledgment and the `listChanged` flags from 
 - **`resources.subscribe`.** The flag stays with the info provider. Advertise it there, or
   `rmcp` drops every requested resource subscription.
 - **Part sink.** `SubscriptionPart::sink` refuses a notification outside the part's accepted
-  filter with `SubscriptionSendError::NotificationNotAccepted`.
+  filter with `SubscriptionSendError::NotificationNotAccepted`. Once the part is cancelled,
+  the sink refuses every notification with `SubscriptionSendError::SubscriptionClosed`, also a
+  send still pending when the cancellation arrives.
 
 Without a subscriptions provider, `subscriptions/listen` is method-not-found. No blanket
 implementation of `SubscriptionsProvider` exists for `ServerHandler`: `ServerHandler::listen`
