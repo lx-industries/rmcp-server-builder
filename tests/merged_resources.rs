@@ -358,3 +358,56 @@ async fn subscribe_reaches_the_same_provider_read_resource_would_via_real_client
     client.cancel().await.expect("cancel client");
     server_task.await.expect("server task");
 }
+
+#[tokio::test]
+async fn a_registered_scheme_owner_that_lists_nothing_reads_its_uris_via_real_client() {
+    let call_log = Arc::new(Mutex::new(Vec::new()));
+    let (server_transport, client_transport) = tokio::io::duplex(4096);
+    // "ui" lists an unrelated URI and no template. "blob" lists nothing and is
+    // registered only by scheme: no listing, template or inferred scheme names
+    // `blob://state/x`, so only the registered scheme owner can route it.
+    let server = ServerBuilder::new()
+        .info(Implementation::new("test-server", "1.0.0"))
+        .resources(
+            MergedResourcesProvider::new()
+                .with_provider(Stub::new(
+                    "ui",
+                    vec![resource("ui://a")],
+                    Vec::new(),
+                    call_log.clone(),
+                ))
+                .with_scheme_owner(
+                    "blob",
+                    Stub::new("blob", Vec::new(), Vec::new(), call_log.clone()),
+                ),
+        )
+        .build();
+    let server_task = tokio::spawn(async move {
+        let running = server.serve(server_transport).await.expect("serve server");
+        running.waiting().await.expect("server stops");
+    });
+
+    let client = client_configuration()
+        .serve(client_transport)
+        .await
+        .expect("initialize client");
+
+    for uri in ["blob://state/x", "BLOB://state/x"] {
+        let result = client
+            .read_resource(ReadResourceRequestParams::new(uri))
+            .await
+            .unwrap_or_else(|error| panic!("read_resource {uri}: {error:?}"));
+        let rmcp::model::ResourceContents::TextResourceContents { text, .. } = &result.contents[0]
+        else {
+            panic!("expected text resource contents");
+        };
+        assert_eq!(text, "read by blob", "{uri}");
+    }
+    assert_eq!(
+        *call_log.lock().expect("call log lock"),
+        vec!["blob", "blob"]
+    );
+
+    client.cancel().await.expect("cancel client");
+    server_task.await.expect("server task");
+}

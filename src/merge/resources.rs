@@ -11,8 +11,9 @@
 //! which composed provider a URI belongs to, then delegates the call to that provider.
 //! Routing tries, in order: (1) an exact URI listed by exactly one provider's
 //! `list_resources`; (2) failing that, a URI matching exactly one provider's resource
-//! template (level-1 RFC 6570, see [`template_matches`]); (3) failing that, the sole
-//! provider that owns the URI's scheme, derived from the schemes of every provider's
+//! template (level-1 RFC 6570, see [`template_matches`]); (3) failing that, a scheme
+//! registered with [`MergedResourcesProvider::with_scheme_owner`]; (4) failing that, the
+//! sole provider that owns the URI's scheme, derived from the schemes of every provider's
 //! listed resources and templates. Two or more candidates at any step, or zero at the
 //! last one, is a routing error naming the URI (and the candidates, where there is more
 //! than one).
@@ -310,6 +311,9 @@ mod template_matches_tests {
 pub struct MergedResourcesProvider {
     /// The composed providers, in listing order.
     providers: Vec<Box<dyn DynResourcesProvider>>,
+    /// The schemes registered with [`MergedResourcesProvider::with_scheme_owner`], each
+    /// with the 0-indexed provider that owns it.
+    scheme_owners: Vec<(String, usize)>,
     /// The 0-indexed composed provider a successful `subscribe` reached, by URI.
     ///
     /// `unsubscribe` consults this before falling back to
@@ -327,6 +331,7 @@ impl MergedResourcesProvider {
     pub fn new() -> Self {
         Self {
             providers: Vec::new(),
+            scheme_owners: Vec::new(),
             provider_index_by_subscribed_uri: std::sync::Mutex::new(HashMap::new()),
         }
     }
@@ -338,6 +343,25 @@ impl MergedResourcesProvider {
     /// cursor it hands out.
     #[must_use]
     pub fn with_provider<T: ResourcesProvider>(mut self, provider: T) -> Self {
+        self.providers.push(Box::new(provider));
+        self
+    }
+
+    /// Adds `provider` to the composition, after every provider added so far, and
+    /// registers it as the owner of `scheme`.
+    ///
+    /// Routing consults a registered scheme after the exact-URI and template steps and
+    /// before scheme inference: a provider whose URIs no listing names (for example a
+    /// provider of `blob://` URIs with no resource list) still receives them. Two
+    /// registrations of one scheme are a routing error for every URI of that scheme.
+    #[must_use]
+    pub fn with_scheme_owner<T: ResourcesProvider>(
+        mut self,
+        scheme: impl Into<String>,
+        provider: T,
+    ) -> Self {
+        self.scheme_owners
+            .push((scheme.into(), self.providers.len()));
         self.providers.push(Box::new(provider));
         self
     }
@@ -437,8 +461,11 @@ impl MergedResourcesProvider {
     /// 2. Failing that, a URI matching one or more resource templates of exactly one
     ///    provider (level-1 RFC 6570, via [`template_matches`]) routes there: ambiguity
     ///    is counted by provider, not by template.
-    /// 3. Failing both, the provider that owns `uri`'s scheme routes there: a provider
-    ///    owns a scheme when at least one of its listed resources or templates uses it.
+    /// 3. Failing both, a scheme registered with [`MergedResourcesProvider::with_scheme_owner`]
+    ///    routes there.
+    /// 4. Failing all three, the provider that owns `uri`'s scheme routes there: a
+    ///    provider owns a scheme when at least one of its listed resources or templates
+    ///    uses it.
     ///
     /// # Errors
     ///
@@ -447,9 +474,10 @@ impl MergedResourcesProvider {
     /// providers (expected to have already been rejected by a prior `list_resources`
     /// call; see that function's doc comment on the transient-state case). Step 2
     /// returns [`ambiguous_template_match_error`] when matching templates span two or
-    /// more distinct providers. Step 3 returns [`no_scheme_error`] when `uri`
-    /// has no `"://"` separator, or [`scheme_ownership_error`] when zero or more than one
-    /// provider owns the scheme.
+    /// more distinct providers. Step 3 returns [`scheme_ownership_error`] when `uri`'s
+    /// scheme is registered to more than one provider. Step 4 returns [`no_scheme_error`]
+    /// when `uri` has no `"://"` separator, or [`scheme_ownership_error`] when zero or
+    /// more than one provider owns the scheme.
     async fn resolve_provider_index_for_uri(
         &self,
         uri: &str,
@@ -480,6 +508,19 @@ impl MergedResourcesProvider {
         }
 
         let scheme = scheme_of(uri).ok_or_else(|| no_scheme_error(uri))?;
+
+        let registered_owners: Vec<usize> = self
+            .scheme_owners
+            .iter()
+            .filter(|(registered_scheme, _)| registered_scheme == scheme)
+            .map(|(_, provider_index)| *provider_index)
+            .collect();
+        match registered_owners.as_slice() {
+            [only_owner] => return Ok(*only_owner),
+            [] => {}
+            owners => return Err(scheme_ownership_error(uri, scheme, owners)),
+        }
+
         let mut owning_providers: Vec<usize> = owner_by_uri
             .iter()
             .filter(|(resource_uri, _)| scheme_of(resource_uri) == Some(scheme))
@@ -1435,5 +1476,103 @@ mod tests {
         .expect("unsubscribe succeeds");
 
         assert_eq!(*call_log.lock().expect("call log lock"), vec!["a", "a"]);
+    }
+
+    #[tokio::test]
+    async fn a_registered_scheme_owner_routes_a_uri_nothing_lists() {
+        let call_log = Arc::new(Mutex::new(Vec::new()));
+        let merged = MergedResourcesProvider::new()
+            .with_provider(
+                Stub::single_page(vec![resource("ui://a")])
+                    .named("ui")
+                    .with_call_log(call_log.clone()),
+            )
+            .with_scheme_owner(
+                "blob",
+                Stub::single_page(Vec::new())
+                    .named("blob")
+                    .with_call_log(call_log.clone()),
+            );
+
+        ResourcesProvider::read_resource(
+            &merged,
+            ReadResourceRequestParams::new("blob://state/x"),
+            test_context().await,
+        )
+        .await
+        .expect("the registered owner reads the URI");
+
+        assert_eq!(*call_log.lock().expect("call log lock"), vec!["blob"]);
+    }
+
+    #[tokio::test]
+    async fn a_listed_uri_routes_before_the_registered_scheme_owner() {
+        let call_log = Arc::new(Mutex::new(Vec::new()));
+        let merged = MergedResourcesProvider::new()
+            .with_provider(
+                Stub::single_page(vec![resource("blob://listed")])
+                    .named("lister")
+                    .with_call_log(call_log.clone()),
+            )
+            .with_scheme_owner(
+                "blob",
+                Stub::single_page(Vec::new())
+                    .named("owner")
+                    .with_call_log(call_log.clone()),
+            );
+
+        ResourcesProvider::read_resource(
+            &merged,
+            ReadResourceRequestParams::new("blob://listed"),
+            test_context().await,
+        )
+        .await
+        .expect("the listing provider reads the URI");
+
+        assert_eq!(*call_log.lock().expect("call log lock"), vec!["lister"]);
+    }
+
+    #[tokio::test]
+    async fn a_registered_scheme_owner_wins_over_scheme_inference() {
+        let call_log = Arc::new(Mutex::new(Vec::new()));
+        let merged = MergedResourcesProvider::new()
+            .with_provider(
+                Stub::single_page(vec![resource("blob://other")])
+                    .named("inferred")
+                    .with_call_log(call_log.clone()),
+            )
+            .with_scheme_owner(
+                "blob",
+                Stub::single_page(Vec::new())
+                    .named("owner")
+                    .with_call_log(call_log.clone()),
+            );
+
+        ResourcesProvider::read_resource(
+            &merged,
+            ReadResourceRequestParams::new("blob://unlisted"),
+            test_context().await,
+        )
+        .await
+        .expect("the registered owner reads the URI");
+
+        assert_eq!(*call_log.lock().expect("call log lock"), vec!["owner"]);
+    }
+
+    #[tokio::test]
+    async fn two_registered_owners_of_one_scheme_are_a_routing_error() {
+        let merged = MergedResourcesProvider::new()
+            .with_scheme_owner("blob", Stub::single_page(Vec::new()))
+            .with_scheme_owner("blob", Stub::single_page(Vec::new()));
+
+        let error = ResourcesProvider::read_resource(
+            &merged,
+            ReadResourceRequestParams::new("blob://x"),
+            test_context().await,
+        )
+        .await
+        .expect_err("two owners of one scheme do not route");
+
+        assert!(error.message.contains("blob"), "{error:?}");
     }
 }

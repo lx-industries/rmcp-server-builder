@@ -94,7 +94,7 @@ Each merging type routes a call to the composed provider that owns it:
 | Capability | Routes by |
 |---|---|
 | Tools, prompts | exact name |
-| Resources | exact URI, then resource template, then URI scheme |
+| Resources | exact URI, then resource template, then registered scheme owner, then inferred URI scheme |
 | Completions | the `ref` the request names (a prompt or a resource template) |
 | Logging | fans out: every composed provider receives the call |
 | `tasks/*` | the provider that created the task |
