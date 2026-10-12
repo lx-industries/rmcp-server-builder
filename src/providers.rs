@@ -2,7 +2,8 @@
 //!
 //! Each trait represents a single capability group that can be composed into a server.
 //! Blanket implementations ensure that any `ServerHandler` automatically implements
-//! all provider traits.
+//! `ToolsProvider`, `PromptsProvider`, `ResourcesProvider`, `CompletionProvider` and
+//! `LoggingProvider`. `ServerInfoProvider` and `SubscriptionsProvider` have none.
 
 use std::borrow::Cow;
 

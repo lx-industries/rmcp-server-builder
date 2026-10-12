@@ -1140,7 +1140,7 @@ impl SubscriptionsProvider for Triggered {
 }
 
 #[tokio::test]
-async fn a_send_pending_when_its_part_is_cancelled_is_refused() {
+async fn a_send_pending_when_its_part_is_cancelled_returns_subscription_closed() {
     let (ending, end) = Triggered::new("a://", TriggeredRole::End);
     let (sending, send) = Triggered::new("b://", TriggeredRole::Update("b://1"));
     let send_result = Arc::clone(&sending.send_result);
@@ -1188,7 +1188,9 @@ async fn a_send_pending_when_its_part_is_cancelled_is_refused() {
     })
     .await;
     end.send(()).expect("the ending part waits");
-    eventually("the pending send to end", || {
+    // The pending send returns, with `SubscriptionClosed`. Its notification can still
+    // reach the client: the test asserts nothing on that delivery.
+    eventually("the pending send to return", || {
         send_result.lock().expect("send result lock").is_some()
     })
     .await;

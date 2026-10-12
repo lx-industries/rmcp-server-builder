@@ -72,7 +72,8 @@ where
     /// provider unchanged.
     ///
     /// With a subscriptions provider set, `listChanged` on tools, prompts and resources comes
-    /// from the provider's [`support`](SubscriptionsProvider::support) instead.
+    /// from the provider's [`support`](SubscriptionsProvider::support) instead, for every
+    /// protocol version: also for a client on a version without `subscriptions/listen`.
     /// `resources.subscribe` stays with the info provider: `rmcp` drops requested resource
     /// subscriptions from a `subscriptions/listen` acknowledgment unless it is advertised.
     fn combined_capabilities(&self) -> ServerCapabilities {
@@ -605,6 +606,10 @@ impl LoggingProvider for Unset {
     }
 }
 
+/// `.subscriptions(Unset)` acknowledges a `subscriptions/listen` with an empty filter and
+/// advertises no `listChanged` flag on tools, prompts and resources. The other `Unset`
+/// slots answer method-not-found instead. Without a `.subscriptions` call,
+/// `subscriptions/listen` is method-not-found.
 impl SubscriptionsProvider for Unset {
     fn support(&self) -> ListChangedSupport {
         ListChangedSupport::default()

@@ -14,7 +14,8 @@
 //! template (level-1 RFC 6570, see [`template_matches`]); (3) failing that, a scheme
 //! registered with [`MergedResourcesProvider::with_scheme_owner`]; (4) failing that, the
 //! sole provider that owns the URI's scheme, derived from the schemes of every provider's
-//! listed resources and templates. Two or more candidates at any step, or zero at the
+//! listed resources and templates. Steps 3 and 4 compare schemes case-insensitively
+//! (RFC 3986 §3.1). Two or more candidates at any step, or zero at the
 //! last one, is a routing error naming the URI (and the candidates, where there is more
 //! than one).
 
@@ -190,6 +191,23 @@ fn scheme_of(uri: &str) -> Option<&str> {
     uri.split_once("://").map(|(scheme, _)| scheme)
 }
 
+/// Whether the scheme of `uri` is `scheme`, compared case-insensitively (RFC 3986 §3.1).
+fn has_scheme(uri: &str, scheme: &str) -> bool {
+    scheme_of(uri).is_some_and(|uri_scheme| uri_scheme.eq_ignore_ascii_case(scheme))
+}
+
+/// Whether `candidate` is an RFC 3986 scheme (§3.1):
+/// `ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )`.
+fn is_scheme(candidate: &str) -> bool {
+    let mut characters = candidate.chars();
+    characters
+        .next()
+        .is_some_and(|first| first.is_ascii_alphabetic())
+        && characters.all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '+' | '-' | '.')
+        })
+}
+
 /// Builds the ambiguity error [`MergedResourcesProvider::resolve_provider_index_for_uri`]
 /// answers when two or more resource templates, possibly listed by different providers,
 /// match `uri`.
@@ -311,8 +329,8 @@ mod template_matches_tests {
 pub struct MergedResourcesProvider {
     /// The composed providers, in listing order.
     providers: Vec<Box<dyn DynResourcesProvider>>,
-    /// The schemes registered with [`MergedResourcesProvider::with_scheme_owner`], each
-    /// with the 0-indexed provider that owns it.
+    /// The schemes registered with [`MergedResourcesProvider::with_scheme_owners`], in
+    /// lowercase, each with the 0-indexed provider that owns it.
     scheme_owners: Vec<(String, usize)>,
     /// The 0-indexed composed provider a successful `subscribe` reached, by URI.
     ///
@@ -350,18 +368,57 @@ impl MergedResourcesProvider {
     /// Adds `provider` to the composition, after every provider added so far, and
     /// registers it as the owner of `scheme`.
     ///
+    /// Write `scheme` without `://`, for example `blob`. A scheme is case-insensitive
+    /// (RFC 3986 §3.1): the registration stores it in lowercase, and `BLOB://x` routes
+    /// to the owner of `blob`.
+    ///
     /// Routing consults a registered scheme after the exact-URI and template steps and
     /// before scheme inference: a provider whose URIs no listing names (for example a
     /// provider of `blob://` URIs with no resource list) still receives them. Two
     /// registrations of one scheme are a routing error for every URI of that scheme.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `scheme` is not an RFC 3986 scheme (§3.1: a letter, then letters,
+    /// digits, `+`, `-` or `.`), for example `blob://`.
     #[must_use]
     pub fn with_scheme_owner<T: ResourcesProvider>(
-        mut self,
+        self,
         scheme: impl Into<String>,
         provider: T,
     ) -> Self {
-        self.scheme_owners
-            .push((scheme.into(), self.providers.len()));
+        self.with_scheme_owners([scheme], provider)
+    }
+
+    /// Adds `provider` to the composition once, after every provider added so far, and
+    /// registers it as the owner of each scheme in `schemes`.
+    ///
+    /// Each scheme follows the rules of
+    /// [`with_scheme_owner`](MergedResourcesProvider::with_scheme_owner). A scheme that
+    /// recurs in `schemes`, in any case, registers once. With no scheme, `provider` joins
+    /// the composition with no registration, as with
+    /// [`with_provider`](MergedResourcesProvider::with_provider).
+    ///
+    /// # Panics
+    ///
+    /// Panics when a scheme in `schemes` is not an RFC 3986 scheme.
+    #[must_use]
+    pub fn with_scheme_owners<T: ResourcesProvider>(
+        mut self,
+        schemes: impl IntoIterator<Item = impl Into<String>>,
+        provider: T,
+    ) -> Self {
+        let provider_index = self.providers.len();
+        for scheme in schemes {
+            let scheme = scheme.into();
+            assert!(
+                is_scheme(&scheme),
+                "{scheme:?} is not an RFC 3986 scheme: write a letter, then letters, digits, \
+                 `+`, `-` or `.`, without `://`"
+            );
+            self.scheme_owners
+                .push((scheme.to_ascii_lowercase(), provider_index));
+        }
         self.providers.push(Box::new(provider));
         self
     }
@@ -509,12 +566,15 @@ impl MergedResourcesProvider {
 
         let scheme = scheme_of(uri).ok_or_else(|| no_scheme_error(uri))?;
 
-        let registered_owners: Vec<usize> = self
+        let mut registered_owners: Vec<usize> = self
             .scheme_owners
             .iter()
-            .filter(|(registered_scheme, _)| registered_scheme == scheme)
+            .filter(|(registered_scheme, _)| registered_scheme.eq_ignore_ascii_case(scheme))
             .map(|(_, provider_index)| *provider_index)
             .collect();
+        // One provider registered twice for one scheme (`["blob", "BLOB"]`) is one owner.
+        registered_owners.sort_unstable();
+        registered_owners.dedup();
         match registered_owners.as_slice() {
             [only_owner] => return Ok(*only_owner),
             [] => {}
@@ -523,12 +583,12 @@ impl MergedResourcesProvider {
 
         let mut owning_providers: Vec<usize> = owner_by_uri
             .iter()
-            .filter(|(resource_uri, _)| scheme_of(resource_uri) == Some(scheme))
+            .filter(|(resource_uri, _)| has_scheme(resource_uri, scheme))
             .map(|(_, &provider_index)| provider_index)
             .chain(
                 templates
                     .iter()
-                    .filter(|(_, template)| scheme_of(template) == Some(scheme))
+                    .filter(|(_, template)| has_scheme(template, scheme))
                     .map(|(provider_index, _)| *provider_index),
             )
             .collect();
@@ -1574,5 +1634,107 @@ mod tests {
         .expect_err("two owners of one scheme do not route");
 
         assert!(error.message.contains("blob"), "{error:?}");
+    }
+
+    #[tokio::test]
+    async fn a_registered_scheme_matches_a_uri_scheme_in_any_case() {
+        let call_log = Arc::new(Mutex::new(Vec::new()));
+        let merged = MergedResourcesProvider::new().with_scheme_owner(
+            "Blob",
+            Stub::single_page(Vec::new())
+                .named("owner")
+                .with_call_log(call_log.clone()),
+        );
+
+        ResourcesProvider::read_resource(
+            &merged,
+            ReadResourceRequestParams::new("BLOB://x"),
+            test_context().await,
+        )
+        .await
+        .expect("the registered owner reads the URI");
+
+        assert_eq!(*call_log.lock().expect("call log lock"), vec!["owner"]);
+    }
+
+    #[test]
+    #[should_panic(expected = "not an RFC 3986 scheme")]
+    fn a_registration_with_the_separator_is_rejected() {
+        let _ = MergedResourcesProvider::new()
+            .with_scheme_owner("blob://", Stub::single_page(Vec::new()));
+    }
+
+    #[test]
+    #[should_panic(expected = "not an RFC 3986 scheme")]
+    fn a_registration_that_starts_with_a_digit_is_rejected() {
+        let _ = MergedResourcesProvider::new()
+            .with_scheme_owner("1blob", Stub::single_page(Vec::new()));
+    }
+
+    #[tokio::test]
+    async fn one_provider_owns_several_registered_schemes() {
+        let call_log = Arc::new(Mutex::new(Vec::new()));
+        let merged = MergedResourcesProvider::new().with_scheme_owners(
+            ["blob", "state"],
+            Stub::single_page(Vec::new())
+                .named("owner")
+                .with_call_log(call_log.clone()),
+        );
+
+        for uri in ["blob://x", "state://y"] {
+            ResourcesProvider::read_resource(
+                &merged,
+                ReadResourceRequestParams::new(uri),
+                test_context().await,
+            )
+            .await
+            .expect("the registered owner reads the URI");
+        }
+
+        assert_eq!(
+            *call_log.lock().expect("call log lock"),
+            vec!["owner", "owner"]
+        );
+    }
+
+    #[tokio::test]
+    async fn one_provider_registered_twice_for_one_scheme_is_its_sole_owner() {
+        let call_log = Arc::new(Mutex::new(Vec::new()));
+        let merged = MergedResourcesProvider::new().with_scheme_owners(
+            ["blob", "BLOB"],
+            Stub::single_page(Vec::new())
+                .named("owner")
+                .with_call_log(call_log.clone()),
+        );
+
+        ResourcesProvider::read_resource(
+            &merged,
+            ReadResourceRequestParams::new("blob://x"),
+            test_context().await,
+        )
+        .await
+        .expect("one provider owns the scheme");
+
+        assert_eq!(*call_log.lock().expect("call log lock"), vec!["owner"]);
+    }
+
+    #[tokio::test]
+    async fn an_inferred_scheme_matches_a_uri_scheme_in_any_case() {
+        let call_log = Arc::new(Mutex::new(Vec::new()));
+        let merged = MergedResourcesProvider::new().with_provider(
+            Stub::single_page(vec![resource("blob://listed")])
+                .named("inferred")
+                .with_call_log(call_log.clone()),
+        );
+
+        ResourcesProvider::read_resource(
+            &merged,
+            ReadResourceRequestParams::new("BLOB://unlisted"),
+            test_context().await,
+        )
+        .await
+        .expect("the provider of the scheme reads the URI");
+
+        assert_eq!(*call_log.lock().expect("call log lock"), vec!["inferred"]);
     }
 }

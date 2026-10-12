@@ -39,7 +39,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-rmcp-server-builder = "0.2"
+rmcp-server-builder = "0.4"
 rmcp = { version = "3.5.1", features = ["server"] }
 ```
 
@@ -143,14 +143,23 @@ The composed server derives the acknowledgment and the `listChanged` flags from 
   removes each flag and each resource subscription that the server capabilities do not
   advertise.
 - **`listChanged`.** With a subscriptions provider set, `listChanged` on the tools, prompts
-  and resources capabilities comes from `support()`. A provider with a static list supports
+  and resources capabilities comes from `support()`, for every protocol version: also for a
+  client on a version without `subscriptions/listen`. A provider with a static list supports
   the flag and never sends the notification.
 - **`resources.subscribe`.** The flag stays with the info provider. Advertise it there, or
   `rmcp` drops every requested resource subscription.
+- **Stream end.** `listen` returning ends the stream: `Ok(())` sends the completion result,
+  an error sends that error. In a `MergedSubscriptionsProvider`, the first part to end ends
+  the stream with its outcome; the other parts are cancelled, and the stream ends after
+  every part has ended. A part that ignores its cancellation holds the stream open.
 - **Part sink.** `SubscriptionPart::sink` refuses a notification outside the part's accepted
   filter with `SubscriptionSendError::NotificationNotAccepted`. Once the part is cancelled,
-  the sink refuses every notification with `SubscriptionSendError::SubscriptionClosed`, also a
-  send still pending when the cancellation arrives.
+  the sink refuses every notification with `SubscriptionSendError::SubscriptionClosed`; a
+  refused notification is not delivered. A send still pending when the cancellation arrives
+  also returns `SubscriptionClosed`, with delivery undetermined: `rmcp` can already have
+  queued the notification for its transport. A part MAY start already cancelled:
+  another part of a `MergedSubscriptionsProvider` can end the stream before it first runs.
+  Handle a send error; do not `.expect()` a send.
 
 Without a subscriptions provider, `subscriptions/listen` is method-not-found. No blanket
 implementation of `SubscriptionsProvider` exists for `ServerHandler`: `ServerHandler::listen`
@@ -159,6 +168,16 @@ takes a `SubscriptionContext`, which only `rmcp` builds.
 `subscriptions/listen` exists on protocol 2026-07-28 only. The composed server implements the
 protocol versions that `ServerInfoProvider::supported_protocol_versions` returns; the default
 is every version `rmcp` knows.
+
+## Upgrading from 0.3
+
+`Server` and `ServerBuilder` take a seventh type parameter, the subscriptions provider,
+between the logging and the info parameters. Write `Unset` there wherever the type is named:
+
+| 0.3 | 0.4 |
+|---|---|
+| `Server<T, P, R, C, L, I>` | `Server<T, P, R, C, L, Unset, I>` |
+| `ServerBuilder<T, P, R, C, L, I>` | `ServerBuilder<T, P, R, C, L, Unset, I>` |
 
 ## Upgrading from 0.1
 

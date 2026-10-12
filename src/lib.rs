@@ -52,24 +52,17 @@
 //! [`MergedPromptsProvider`], [`MergedResourcesProvider`], [`MergedCompletionProvider`],
 //! [`MergedLoggingProvider`], [`MergedSubscriptionsProvider`].
 //!
-//! A merged provider re-lists every composed provider on each `list_*` call, so a list
-//! change is visible on the next call. The composed server advertises `listChanged` only
-//! when every provider of a [`MergedSubscriptionsProvider`] supports it: one provider's
-//! flag would promise notifications the others never send.
+//! The README's [Merging providers] section holds the composition rules and the table of
+//! what each merging type routes by.
 //!
-//! | Capability | Routes by |
-//! |---|---|
-//! | Tools, prompts | exact name |
-//! | Resources | exact URI, then resource template, then registered scheme owner, then inferred URI scheme |
-//! | Completions | the `ref` the request names (a prompt or a resource template) |
-//! | Logging | fans out: every composed provider receives the call |
-//! | Subscriptions | a URI to its one accepting provider; list-changed flags to every provider |
-//! | `tasks/*` | the provider that created the task |
+//! [Merging providers]: https://gitlab.com/lx-industries/rmcp-server-builder#merging-providers
 //!
 //! # Capability Auto-Detection
 //!
 //! The composed server automatically sets capability flags based on which providers
 //! are configured. If you set a tools provider, `capabilities.tools` will be enabled.
+//! A subscriptions provider sets `listChanged` on tools, prompts and resources from its
+//! [`support`](SubscriptionsProvider::support).
 
 mod builder;
 mod merge;

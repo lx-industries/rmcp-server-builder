@@ -61,12 +61,27 @@ pub trait SubscriptionsProvider: Send + Sync + 'static {
     fn support(&self) -> ListChangedSupport;
 
     /// Whether this provider sends `notifications/resources/updated` for `uri`.
+    ///
+    /// The answer MUST stay stable for the life of a stream: the composed server asks once
+    /// for the acknowledgment, and [`MergedSubscriptionsProvider`] asks again when it
+    /// splits the accepted URIs across parts.
+    ///
+    /// [`MergedSubscriptionsProvider`]: crate::MergedSubscriptionsProvider
     fn accepts_resource(&self, uri: &str) -> bool;
 
     /// Runs this provider's part of one stream until the part ends.
     ///
     /// `Ok(())` ends the stream gracefully, an error ends it with that error. Return
-    /// when [`SubscriptionPart::cancelled`] completes.
+    /// when [`SubscriptionPart::cancelled`] completes. A part with nothing to send MUST
+    /// wait for `cancelled`; returning ends the whole stream, every other part included.
+    ///
+    /// A part MAY start already cancelled: under a [`MergedSubscriptionsProvider`],
+    /// another part can end the stream before this part first runs. Every send of a
+    /// cancelled part fails with `SubscriptionSendError::SubscriptionClosed`, so handle a
+    /// send error; a panic on it (for example `.expect()`) ends the stream without its
+    /// graceful completion.
+    ///
+    /// [`MergedSubscriptionsProvider`]: crate::MergedSubscriptionsProvider
     fn listen(&self, part: SubscriptionPart) -> impl Future<Output = Result<(), ErrorData>> + Send;
 }
 
@@ -182,8 +197,11 @@ impl SubscriptionPartSink {
     ///
     /// # Errors
     ///
-    /// [`SubscriptionSendError::SubscriptionClosed`] once this part is cancelled, also for
-    /// a send still pending when the cancellation arrives.
+    /// [`SubscriptionSendError::SubscriptionClosed`] once this part is cancelled. A send
+    /// refused before it reaches `rmcp` is not delivered. A send still pending when the
+    /// cancellation arrives also returns `SubscriptionClosed`, but its delivery is
+    /// undetermined: once `rmcp` has queued the notification for its transport, the
+    /// refusal cannot retract it.
     /// [`SubscriptionSendError::NotificationNotAccepted`] for a list-changed or
     /// resource-updated notification outside this part's filter; otherwise every error
     /// of `rmcp`'s `SubscriptionSink::send`.

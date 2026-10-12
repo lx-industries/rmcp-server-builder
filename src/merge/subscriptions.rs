@@ -47,7 +47,9 @@ impl<T: SubscriptionsProvider> DynSubscriptionsProvider for T {
 /// * `support` is the intersection of every provider's support; an empty composition
 ///   supports nothing.
 /// * `accepts_resource` accepts a URI that exactly one provider accepts: zero or two
-///   owners leave it out of the acknowledgment.
+///   owners leave it out of the acknowledgment. Each provider's answer MUST stay stable
+///   for the life of a stream: the merged provider asks once for the acknowledgment and
+///   again when it splits the URIs across parts.
 /// * `listen` runs every provider's part, also a part with an empty filter: a provider
 ///   MAY send custom notifications through the peer. The first part to end ends the
 ///   stream with its outcome; the other parts are cancelled and polled concurrently
