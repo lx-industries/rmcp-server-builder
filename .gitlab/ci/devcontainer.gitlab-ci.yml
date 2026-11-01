@@ -4,7 +4,7 @@
   image: docker:29@sha256:9e79b879b177fbd72c34376a3dd3d91747da5db49e1f560f76aea59561471977
   services:
     # renovate: datasource=docker depName=docker
-    - docker:29-dind@sha256:3ef33f2e220b79ed3ef3b99d81746f06f306cd6340e2cb7331d17ae996e74cb6
+    - docker:29-dind@sha256:9e79b879b177fbd72c34376a3dd3d91747da5db49e1f560f76aea59561471977
   tags:
     - docker-in-docker
 
