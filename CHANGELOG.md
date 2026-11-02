@@ -1,3 +1,19 @@
+## [0.4.1](https://gitlab.com/lx-industries/rmcp-server-builder/compare/v0.4.0...v0.4.1) (2026-11-02)
+
+
+### Miscellaneous Chores
+
+* **deps:** update dependency tianon/gosu to v1.20 ([9a1ea35](https://gitlab.com/lx-industries/rmcp-server-builder/commit/9a1ea354f05ea651da72024b056d5984a808c144))
+* **deps:** update docker:29 docker digest to 9e79b87 ([5f0f3b8](https://gitlab.com/lx-industries/rmcp-server-builder/commit/5f0f3b8716fd0bc97954b848e642c8581d7cefc0))
+* **deps:** update docker:29-dind docker digest to 9e79b87 ([04b7e13](https://gitlab.com/lx-industries/rmcp-server-builder/commit/04b7e13bc47d3a88f0eacac0c1c471192d2af49d))
+* **deps:** update node.js to 3d27e5c ([d48f5e5](https://gitlab.com/lx-industries/rmcp-server-builder/commit/d48f5e56bbbd67cb29a3f0785dedd31c81ab4f60))
+* **deps:** update node.js to d862bb5 ([ebdc5a5](https://gitlab.com/lx-industries/rmcp-server-builder/commit/ebdc5a53d732c907afb94d6230dad96c6cd7a1db))
+* **deps:** update node.js to v24.22.1 ([87e299b](https://gitlab.com/lx-industries/rmcp-server-builder/commit/87e299b377de6c563439bafcc1d51d4accefad2f))
+* **deps:** update node.js to v24.22.2 ([e6ec5e2](https://gitlab.com/lx-industries/rmcp-server-builder/commit/e6ec5e2b7c651b76ad1d07635edf460c28db4bed))
+* **deps:** update rust crate rmcp to v3.8.0 ([7d062f7](https://gitlab.com/lx-industries/rmcp-server-builder/commit/7d062f788796a65bc45cd1e4d5db5f826f7e8b08))
+* **deps:** update rust crate tokio to v1.54.1 ([2fe85c3](https://gitlab.com/lx-industries/rmcp-server-builder/commit/2fe85c3bc4572cdcf92c1582c7b642faf1dcec09))
+* **deps:** update rust docker tag to v1.99.1 ([b0f3702](https://gitlab.com/lx-industries/rmcp-server-builder/commit/b0f370265106786941f4167cd4f9c4be0ccbb990))
+
 ## [0.4.0](https://gitlab.com/lx-industries/rmcp-server-builder/compare/v0.3.0...v0.4.0) (2026-10-12)
 
 
