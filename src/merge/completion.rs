@@ -7,7 +7,7 @@
 //! ([`Reference::Resource`]) is routed to whichever composed resource source lists that
 //! template URI. A reference matching no composed source's listing answers
 //! `CompleteResult::default()`, matching `rmcp`'s own default `complete` body (see
-//! `handler/server.rs`, around line 406 of rmcp 3.5.1): an unmatched reference is not a
+//! `handler/server.rs`, around line 461 of rmcp 3.9.0): an unmatched reference is not a
 //! composition error.
 
 use std::pin::Pin;
@@ -203,7 +203,7 @@ async fn source_lists_resource_template(
 ///
 /// A reference matching no composed source answers `CompleteResult::default()`: this
 /// mirrors `rmcp`'s own default `complete` implementation (`handler/server.rs`, rmcp
-/// 3.5.1), which answers the same default for every reference, so a merge type that
+/// 3.9.0), which answers the same default for every reference, so a merge type that
 /// cannot resolve a reference matches the ecosystem convention rather than erroring.
 ///
 /// # One slot, one value: the listing/completion correlation

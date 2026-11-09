@@ -40,7 +40,7 @@ Add to your `Cargo.toml`:
 ```toml
 [dependencies]
 rmcp-server-builder = "0.4"
-rmcp = { version = "3.5.1", features = ["server"] }
+rmcp = { version = "3.9.0", features = ["server"] }
 ```
 
 ## Merging providers

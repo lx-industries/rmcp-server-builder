@@ -10,9 +10,9 @@ keywords = ["mcp", "rmcp", "modelcontextprotocol", "server", "builder"]
 categories = ["development-tools"]
 
 [dependencies]
-rmcp = { version = "3.5.1", features = ["server"] }
+rmcp = { version = "3.9.0", features = ["server"] }
 tokio-util = "0.7.20"
 
 [dev-dependencies]
-rmcp = { version = "3.5.1", features = ["client", "server"] }
+rmcp = { version = "3.9.0", features = ["client", "server"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-util", "sync", "time"] }
