@@ -1,3 +1,10 @@
+## [0.4.4](https://gitlab.com/lx-industries/rmcp-server-builder/compare/v0.4.3...v0.4.4) (2026-11-23)
+
+
+### Miscellaneous Chores
+
+* **deps:** update rust crate rmcp to 3.11.0 ([5c64af7](https://gitlab.com/lx-industries/rmcp-server-builder/commit/5c64af7809646fd2d55b14da68b6bfbc0e893593))
+
 ## [0.4.3](https://gitlab.com/lx-industries/rmcp-server-builder/compare/v0.4.2...v0.4.3) (2026-11-16)
 
 
